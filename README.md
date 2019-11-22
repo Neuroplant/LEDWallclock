@@ -1,9 +1,10 @@
 # LEDWallclock
-very low cost Wallclock based on ESP01 and WS2812B Leds
+very low cost Wallclock based on ESP01 and WS2812B Leds 
+
   include NeoPixelBus libary
   
   # Features:
-  - get time from NTP (instead of buying a RTC-Modul)
+  - get current time from NTP (instead of buying a RTC-Modul)
   - use free pixels as Color light (MQTT /Clock/colorRGB/set)
   - Timer (seconds max 24h) (MQTT /Clock/timer/set)
   - Animation-Alarm (MQTT /Clock/effect/set)
