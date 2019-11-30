@@ -1,0 +1,15 @@
+rule "React on Next Alarm (Echo_nextAlarm) change/update"
+when
+	Item Echo_nextAlarm changed 
+then
+	// your logic here
+	Wallclock_Alarm.sendCommand(Echo_nextAlarm.state)
+end
+
+
+rule "React on Timer (Wallclock_Timer) change/update"
+when
+    Item Wallclock_Timer changed from 2
+then
+    if (Wallclock_Timer.state == 1) Wallclock_Animation.sendCommand(ON)
+end
