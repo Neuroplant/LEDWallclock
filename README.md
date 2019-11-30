@@ -6,7 +6,7 @@ very low cost Wallclock based on ESP01 and WS2812B Leds
   # Features:
   - get current time from NTP (instead of buying a RTC-Modul)
   - use free pixels as Color light (MQTT /Clock/colorRGB/set)
-  - Timer (seconds max 24h) (MQTT /Clock/timer/set)
+  - use Alarm-time (MQTT /Clock/alarm/set)
   - Animation-Alarm (MQTT /Clock/effect/set)
 
   # Parts:
