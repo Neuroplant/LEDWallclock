@@ -8,7 +8,6 @@
   - use free pixels as Color light (MQTT /Clock/colorRGB/set)
   - Timer (seconds max 24h) (MQTT /Clock/timer/set)
   - Animation-Alarm (MQTT /Clock/effect/set)
-
   Parts:
   - PCB (60mm*40mm)
   - DC DC Converter (set to 5V output) (e.g. for 60 LEDs this will be okay, for more LEDs take something bigger:
@@ -26,64 +25,63 @@
 #include <NeoPixelBus.h>
 #include <stdlib.h>
 #include <NeoPixelAnimator.h>
-const uint16_t PixelCount = 60; // best effect with 60 LEDs, but other numbers will work too
-const uint8_t PixelPin = 2;  // make sure to set this to the correct pin, ignored for Esp8266
-///Animation
+
+// Wifi Settings
+const char * 	ssid 		= "Wifi-SSD"; 		// your network SSID (name)
+const char * 	pass 		= "Wifi-PWD";  		// your network password
+// MQTT Settings
+const char* 	MQTTServer	= "MQTT-Server"; 	// your MQTT-Servers name
+// Hardware Settings
+const uint16_t 	PixelCount 	= 60; // best effect with n*60 LEDs, but other numbers will work too
+const uint8_t 	PixelPin 	= 2;  // make sure to set this to the correct pin, ignored for Esp8266
+const uint16_t 	TimerLimit 	= 600;//timer shows only if left time is < TimerLimit
+///NTP Settings
+IPAddress timeServer(134, 95, 192, 172); // Uni Köln
+const int timeZone = 1;     // Central European Time
+//const int timeZone = -5;  // Eastern Standard Time (USA)
+//const int timeZone = -4;  // Eastern Daylight Time (USA)
+//const int timeZone = -8;  // Pacific Standard Time (USA)
+//const int timeZone = -7;  // Pacific Daylight Time (USA)
+// Color Settings (leave to default)
+#define colorSaturation 128
+NeoPixelBus<NeoGrbFeature, NeoEsp8266Uart1Ws2812xMethod > strip(PixelCount, PixelPin);
+RgbColor Csecond (map(255, 0, 255, 0, colorSaturation), map(0, 0, 255, 0, colorSaturation), map(0, 0, 255, 0, colorSaturation));
+RgbColor Cminute (map(0, 0, 255, 0, colorSaturation), map(255, 0, 255, 0, colorSaturation), map(0, 0, 255, 0, colorSaturation));
+RgbColor Chour (map(0, 0, 255, 0, colorSaturation), map(0, 0, 255, 0, colorSaturation), map(255, 0, 255, 0, colorSaturation));
+RgbColor Csegment5 (map(10, 0, 255, 0, colorSaturation), map(10, 0, 255, 0, colorSaturation), map(10, 0, 255, 0, colorSaturation));
+RgbColor Csegment15 (map(200, 0, 255, 0, colorSaturation), map(200, 0, 255, 0, colorSaturation), map(200, 0, 255, 0, colorSaturation));
+RgbColor Ctimer (map(100, 0, 255, 0, colorSaturation), map(0, 0, 255, 0, colorSaturation), map(0, 0, 255, 0, colorSaturation));
+RgbColor black(0);
+
+///Animation Settings (leave to default)
 const uint16_t AnimCount = PixelCount / 5 * 2 + 1; // we only need enough animations for the tail and one extra
 const uint16_t PixelFadeDuration = 300; // third of a second
 // one second divide by the number of pixels = loop once a second
 const uint16_t NextPixelMoveDuration = 1000 / PixelCount; // how fast we move through the pixels
 NeoGamma<NeoGammaTableMethod> colorGamma; // for any fade animations, best to correct gamma
 const uint16_t AniTime = 10; //how long will the animation be shown (seconds)
-///Amimation
+///
 
-#define colorSaturation 128
-NeoPixelBus<NeoGrbFeature, NeoEsp8266Uart1Ws2812xMethod > strip(PixelCount, PixelPin);
-// Colors for hands
-RgbColor Csecond (map(255, 0, 255, 0, colorSaturation), map(0, 0, 255, 0, colorSaturation), map(0, 0, 255, 0, colorSaturation));
-RgbColor Cminute (map(0, 0, 255, 0, colorSaturation), map(255, 0, 255, 0, colorSaturation), map(0, 0, 255, 0, colorSaturation));
-RgbColor Chour (map(0, 0, 255, 0, colorSaturation), map(0, 0, 255, 0, colorSaturation), map(255, 0, 255, 0, colorSaturation));
-RgbColor Csegment5 (map(10, 0, 255, 0, colorSaturation), map(10, 0, 255, 0, colorSaturation), map(10, 0, 255, 0, colorSaturation));
-RgbColor Csegment15 (map(200, 0, 255, 0, colorSaturation), map(200, 0, 255, 0, colorSaturation), map(200, 0, 255, 0, colorSaturation));
-RgbColor Ctimer (map(255, 0, 255, 0, colorSaturation), map(0, 0, 255, 0, colorSaturation), map(0, 0, 255, 0, colorSaturation));
-
-RgbColor black(0);
 
 //input RGB from mqtt
-int inRed = 50;		//0..255
-int inGreen = 50;	//0..255
-int inBlue = 50;		//0..255
+int inRed 	= 	50;		//0..255
+int inGreen = 	50;		//0..255
+int inBlue 	= 	50;		//0..255
 
-int pos_second_hand;
-int pos_minute_hand;
-int pos_hour_hand;
-int timer = 0;
+//Hand positions
+time_t 	EndTime 	=	0;
+int 	RestTime	=	0;
 
-#ifndef STASSID
-#define STASSID "WIFI_NAME"// please change
-#define STAPSK  "WIFI_PWD"// please change
-#endif
-
-const char * ssid = STASSID; // your network SSID (name)
-const char * pass = STAPSK;  // your network password
-
-const char* MQTTServer = "MQTT_SERVER";
 int status = WL_IDLE_STATUS;  // the Wifi radio's status
 
-///NTP
-IPAddress timeServer(134, 130, 4, 17); // time-a.timefreq.bldrdoc.gov
-const int timeZone = 2;     // Central European Time
-//const int timeZone = -5;  // Eastern Standard Time (USA)
-//const int timeZone = -4;  // Eastern Daylight Time (USA)
-//const int timeZone = -8;  // Pacific Standard Time (USA)
-//const int timeZone = -7;  // Pacific Daylight Time (USA)
+
 // A UDP instance to let us send and receive packets over UDP
 WiFiUDP Udp;
 unsigned int localPort = 8888;  // local port to listen for UDP packets
 //NTP
 WiFiClient net;
 PubSubClient  client(net);
-
+void AnimationSelect (int value);
 void connect() {
   while (WiFi.status() != WL_CONNECTED) {
     delay(1000);
@@ -93,11 +91,14 @@ void connect() {
   }
   client.subscribe("/Clock/colorRGB/set");
   client.subscribe("/Clock/effect/set");
-  client.subscribe("/Clock/timer/set");
+  // client.subscribe("/Clock/timer/set");
+  client.subscribe("/Clock/alarm/set");
 }
+
 void callback(char* topic, byte* payload, unsigned int length) {
   payload[length] = 0;
   String Payload = String((char*)payload);
+
 
   // change Color
   if (strcmp(topic, "/Clock/colorRGB/set") == 0) {
@@ -105,17 +106,38 @@ void callback(char* topic, byte* payload, unsigned int length) {
     inGreen = Payload.substring(Payload.indexOf(',') + 1, Payload.lastIndexOf(',')).toInt();
     inBlue = Payload.substring(Payload.lastIndexOf(',') + 1).toInt();
   }
+
   //Start Animation
   if (strcmp(topic, "/Clock/effect/set") == 0) {
     int i = Payload.substring(0, length).toInt();
-    Anima(i);
+    AnimationSelect(i);
   }
+
   //Start Timer
   if (strcmp(topic, "/Clock/timer/set") == 0) {
     int i = Payload.substring(0, length).toInt();
-    if (i > 10) Timer(i, Ctimer);
+  }
+
+  //Set Alarm
+  if (strcmp(topic, "/Clock/alarm/set") == 0) {
+    tmElements_t EndTime_e;
+    // * Example for Payload -> "2019-11-26T19:30:00"
+    if (1 == 2) { //(payload[10] != 'T') {
+      EndTime = now(); //timer canceled
+    } else {
+      EndTime_e.Year   =  CalendarYrToTm(Payload.substring(0, Payload.indexOf('-')).toInt());
+      EndTime_e.Month  =  Payload.substring(Payload.indexOf('-') + 1, Payload.lastIndexOf('-')).toInt();
+      EndTime_e.Day  =  Payload.substring(Payload.lastIndexOf('-') + 1, Payload.indexOf('T')).toInt();
+      EndTime_e.Hour  = Payload.substring(Payload.indexOf('T') + 1, Payload.indexOf(':')).toInt();
+      EndTime_e.Minute  = Payload.substring(Payload.indexOf(':') + 1, Payload.lastIndexOf(':')).toInt();
+      EndTime_e.Second  = Payload.substring(Payload.lastIndexOf(':') + 1).toInt();
+
+      EndTime = makeTime(EndTime_e);
+    }
   }
 }
+
+//Animation
 struct MyAnimationState
 {
   RgbColor StartingColor;
@@ -126,7 +148,17 @@ NeoPixelAnimator animations(AnimCount); // NeoPixel animation management object
 MyAnimationState animationState[AnimCount];
 uint16_t frontPixel = 0;  // the front of the loop
 RgbColor frontColor;  // the color at the front of the loop
-void SetRandomSeed()
+///
+NeoPixelAnimator animations02(PixelCount); // NeoPixel animation management object
+MyAnimationState animationState02[PixelCount];
+///
+const uint8_t AnimationChannels = 1; // we only need one as all the pixels are animated at once
+NeoPixelAnimator animations03(AnimationChannels); // NeoPixel animation management object
+MyAnimationState animationState03[AnimationChannels];
+boolean fadeToColor = true;  // general purpose variable used to store effect state
+
+
+void SetRandomSeed(void)
 {
   uint32_t seed;
   // random works best with a seed that can use 31 bits
@@ -140,7 +172,7 @@ void SetRandomSeed()
   }
   randomSeed(seed);
 }
-void FadeOutAnimUpdate(const AnimationParam& param)
+void FadeOutAnimUpdate(const AnimationParam & param)
 {
   // this gets called for each animation on every time step
   // progress will start at 0.0 and end at 1.0
@@ -154,7 +186,7 @@ void FadeOutAnimUpdate(const AnimationParam& param)
   strip.SetPixelColor(animationState[param.index].IndexPixel,
                       colorGamma.Correct(updatedColor));
 }
-void LoopAnimUpdate(const AnimationParam& param)
+void LoopAnimUpdate(const AnimationParam & param)
 {
   // wait for this animation to complete,
   // we are using it as a timer of sorts
@@ -183,31 +215,143 @@ void LoopAnimUpdate(const AnimationParam& param)
     }
   }
 }
+void BlendAnimUpdate02(const AnimationParam & param)
+{
+  // this gets called for each animation on every time step
+  // progress will start at 0.0 and end at 1.0
+  // we use the blend function on the RgbColor to mix
+  // color based on the progress given to us in the animation
+  RgbColor updatedColor = RgbColor::LinearBlend(
+                            animationState02[param.index].StartingColor,
+                            animationState02[param.index].EndingColor,
+                            param.progress);
+  // apply the color to the strip
+  strip.SetPixelColor(param.index, updatedColor);
+}
+void BlendAnimUpdate03(const AnimationParam & param)
+{
+  // this gets called for each animation on every time step
+  // progress will start at 0.0 and end at 1.0
+  // we use the blend function on the RgbColor to mix
+  // color based on the progress given to us in the animation
+  RgbColor updatedColor = RgbColor::LinearBlend(
+                            animationState03[param.index].StartingColor,
+                            animationState03[param.index].EndingColor,
+                            param.progress);
 
-
-void Anima (int value) {
-  switch (value) {
-    case 0:
-      break;
-    case 1:
-	    strip.ClearTo(black);
-		animations.StartAnimation(0, NextPixelMoveDuration, LoopAnimUpdate);
-      int i = now();
-      while (i + AniTime  > now()) {
-		  animations.UpdateAnimations();
-		  strip.Show();
-		  };
-      client.publish("/Clock/effect", "0", true);
-      client.publish("/Clock/effect/set", "0", true);
-      break;
+  // apply the color to the strip
+  for (uint16_t pixel = 0; pixel < PixelCount; pixel++)
+  {
+    strip.SetPixelColor(pixel, updatedColor);
   }
 }
+void PickRandom(float luminance)
+{
+  // pick random count of pixels to animate
+  uint16_t count = random(PixelCount);
+  while (count > 0)
+  {
+    // pick a random pixel
+    uint16_t pixel = random(PixelCount);
+
+    // pick random time and random color
+    // we use HslColor object as it allows us to easily pick a color
+    // with the same saturation and luminance
+    uint16_t time = random(100, 400);
+    animationState02[pixel].StartingColor = strip.GetPixelColor(pixel);
+    animationState02[pixel].EndingColor = HslColor(random(360) / 360.0f, 1.0f, luminance);
+
+    animations02.StartAnimation(pixel, time, BlendAnimUpdate02);
+
+    count--;
+  }
+}
+void FadeInFadeOutRinseRepeat(float luminance)
+{
+  if (fadeToColor)
+  {
+    // Fade upto a random color
+    // we use HslColor object as it allows us to easily pick a hue
+    // with the same saturation and luminance so the colors picked
+    // will have similiar overall brightness
+    RgbColor target = HslColor(random(360) / 360.0f, 1.0f, luminance);
+    uint16_t time = random(800, 2000);
+
+    animationState03[0].StartingColor = strip.GetPixelColor(0);
+    animationState03[0].EndingColor = target;
+
+    animations03.StartAnimation(0, time, BlendAnimUpdate03);
+  }
+  else
+  {
+    // fade to black
+    uint16_t time = random(600, 700);
+
+    animationState03[0].StartingColor = strip.GetPixelColor(0);
+    animationState03[0].EndingColor = RgbColor(0);
+
+    animations03.StartAnimation(0, time, BlendAnimUpdate03);
+  }
+
+  // toggle to the next effect state
+  fadeToColor = !fadeToColor;
+}
+
+void AnimationSelect (int value) {
+  switch (value) {
+    case 0 :
+      break;
+    case 1 : {
+        client.publish("/Clock/effect", "1");
+        strip.ClearTo(black);
+
+        animations.StartAnimation(0, NextPixelMoveDuration, LoopAnimUpdate);
+        int i = now();
+        while (i + AniTime  > now()) {
+          animations.UpdateAnimations();
+          strip.Show();
+        }
+        break;
+      }
+//I have no idea, what I do wrong with switch..case any help welcome
+      /*  case 2 : {
+            client.publish("/Clock/effect", "2");
+            strip.ClearTo(black);
+
+            PickRandom(0.2f); // 0.0 = black, 0.25 is normal, 0.5 is bright
+            int i = now();
+            while (i + AniTime  > now()) {
+              animations02.UpdateAnimations();
+              strip.Show();
+            }
+            break;
+          }
+        case 3 : {
+            client.publish("/Clock/effect", "3");
+            strip.ClearTo(black);
+
+            FadeInFadeOutRinseRepeat(0.2f); // 0.0 = black, 0.25 is normal, 0.5 is bright
+            int i = now();
+            while (i + AniTime  > now()) {
+              animations03.UpdateAnimations();
+              strip.Show();
+            }
+            break;
+          }*/
+  }
+  client.publish("/Clock/effect", "0", true);
+  client.publish("/Clock/effect/set", "0", true);
+}
+
+///Amimation
+
 void setup()
 {
   strip.Begin();
   strip.Show();
   SetRandomSeed();
-
+  // attempt to connect to WiFi network
+  // We start by connecting to a WiFi network
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, pass);
 
@@ -215,8 +359,10 @@ void setup()
     delay(500);
   }
   Udp.begin(localPort);
+
   setSyncProvider(getNtpTime);
   setSyncInterval(3600);
+
   client.setServer(MQTTServer, 1883);
   client.setCallback(callback);
   connect();
@@ -228,48 +374,100 @@ void loop()
   if (!client.connected()) {
     connect();
   }
-  //digitalClockDisplay();
   if (now() != prevDisplay) { //update the display only if time has changed
     prevDisplay = now();
     digitalClockDisplay();
   }
 }
 
-void Clockface(int Red, int Green, int Blue) {
+
+
+void ClockFrame(int Red, int Green, int Blue) {
   RgbColor Cfill(Red, Green, Blue);
   //delete hands and write all leds in selected color
   strip.ClearTo(Cfill);
   //publish to mqtt as feedback (is this needed or wrong?)
   char restate[12];
-  String i = String  (String(Red) + "," + String(Green) + "," + String(Blue));
+  String i = (String(Red) + "," + String(Green) + "," + String(Blue));
   i.toCharArray(restate, 12);
   client.publish("/Clock/colorRGB", restate);
-  //show 5-minute segments
-  if (Red + Green + Blue > 0) {
-    for (int i = 0; i < 12; i++) {
-      strip.SetPixelColor(i * (PixelCount / 60) * 5, Csegment5);
+}
+
+int ClockSegments(RgbColor Cvalue5, RgbColor Cvalue15) {
+  for (int i = 1; i <= 12; i++) {
+    strip.SetPixelColor(i * (PixelCount / 60) * 5, Cvalue5);
+  }
+  //show 15-minute segments
+  for (int i = 1; i <= 4; i++) {
+    strip.SetPixelColor(i * (PixelCount / 60) * 15, Cvalue15);
+  }
+  return 1;
+}
+
+
+void ClockHands(RgbColor CvalueH, RgbColor CvalueM, RgbColor CvalueS) {
+
+  //show hour hand
+  strip.SetPixelColor(map((((hourFormat12() - 1) * 5) + (minute() / 12)), 0, 59, 0, PixelCount - 1), CvalueH);
+  //show minute hand
+  strip.SetPixelColor(map(minute(), 0, 59, 0, PixelCount - 1), CvalueM);
+  //show second hand
+  strip.SetPixelColor(map(second(), 0, 59, 0, PixelCount - 1), CvalueS);
+}
+
+void ClockTimer(time_t value, RgbColor Cvalue) {
+  if (value < now()) {
+    RestTime = 0;
+  } else {
+    RestTime = (int)value - (int)now();
+  }
+  if (RestTime > 0) {
+    char restate[24];
+    sprintf(restate, "%d", RestTime);
+    client.publish("/Clock/timer", restate,false);
+
+    sprintf(restate, "%04d-%02d-%02dT%02d:%02d:%02d", year(value), month(value), day(value), hour(value), minute(value), second(value));
+    // client.publish("/Clock/alarm", restate,false);
+   
+    if ((RestTime >= 3600) && (RestTime <= TimerLimit)) {
+      // >1 hour
+      for (int i = 0; i < map(RestTime, 0, 24 * 3600, 0, PixelCount); i ++) {
+        strip.SetPixelColor(PixelCount - i, Cvalue);
+      }
     }
-    //show 15-minute segments
-    for (int i = 0; i < 4; i++) {
-      strip.SetPixelColor(i * (PixelCount / 60) * 15, Csegment15);
+
+    if ((RestTime > 60) && (RestTime < 3600) && (RestTime <= TimerLimit)) {
+      // >1 Minute
+      for (int i = 0; i <= map(RestTime, 0, 3600, 0, PixelCount); i++) {
+        strip.SetPixelColor(i, Ctimer);
+      }
+    }
+
+    if ((RestTime <= 60) && (RestTime <= TimerLimit)) {
+      //< 1 Minute
+      for (int i = 0; i <= map(RestTime, 0, 60, 0, PixelCount); i++) {
+        strip.SetPixelColor(i, Ctimer);
+      }
     }
   }
 }
 
 void digitalClockDisplay() {
-  Clockface(inRed, inGreen, inBlue);
-  //show hour hand
-  int hours = hour();
-  if (hours >= 12) hours -= 12;
-  pos_hour_hand = map(((hours * 5) + (minute() / 12)), 0, 59, 0, PixelCount - 1);
-  strip.SetPixelColor(pos_hour_hand, Chour);
-  //show minute hand
-  pos_minute_hand = map(minute(), 0, 59, 0, PixelCount - 1);
-  strip.SetPixelColor(pos_minute_hand, Cminute);
-  //show second hand
-  pos_second_hand = map(second(), 0, 59, 0, PixelCount - 1);
-  strip.SetPixelColor(pos_second_hand, Csecond);
+
+  //Clock Frame alias Light
+  ClockFrame(inRed, inGreen, inBlue);
+  //Clock Segments, only shown at a minimum light level
+  if ((inRed > 10) || (inGreen > 10) || (inBlue > 10)) {
+    ClockSegments(Csegment5, Csegment15);
+  }
+  //Timer
+  ClockTimer(EndTime, Ctimer);
+  //Clock Hands, only shown if Light is switched on
+  if (inRed + inGreen + inBlue > 0) {
+    ClockHands(Chour, Cminute, Csecond);
+  }
   strip.Show();
+  connect();
 }
 /*-------- NTP code ----------*/
 const int NTP_PACKET_SIZE = 48; // NTP time is in the first 48 bytes of message
@@ -315,53 +513,3 @@ void sendNTPpacket(IPAddress & address) {
   Udp.endPacket();
 }
 /*-------- NTP code ----------*/
-
-
-void Timer(int TimeLeft, RgbColor Tcolor) {
-  int Endtime = now() + TimeLeft;
-  //Timer loop
-  while (Endtime >= now()) {
-    if (now() != prevDisplay) { //update the display only if time has changed
-      prevDisplay = now();
-      digitalClockDisplay();
-    }
-    TimeLeft = Endtime - now();//update left time to end
-
-    char restate[12];
- 	itoa(TimeLeft,restate,10);
-    client.publish("/Clock/timer", restate);
-
-
-    if (TimeLeft >= 3600) {
-      // >1 hour
-      for (int i = 0; i < map(TimeLeft, 0, 24 * 3600, 0, PixelCount); i ++) {
-        strip.SetPixelColor(PixelCount - i, Tcolor);
-      }
-    }
-    if ((TimeLeft > 60) && (TimeLeft < 3600)) {
-      // >1 Minute
-      for (int i = 0; i <= map(TimeLeft, 0, 3600, 0, PixelCount); i++) {
-        strip.SetPixelColor(i, Tcolor);
-      }
-    }
-    if (TimeLeft <= 60) {
-      //< 1 Minute
-      for (int i = 0; i <= map(TimeLeft, 0, 60, 0, PixelCount); i++) {
-        strip.SetPixelColor(i, Tcolor);
-      }
-    }
-    if (now() != prevDisplay) { //update the display only if time has changed
-      prevDisplay = now();
-    }
-     delay(200);
-	strip.Show();
-  }
-  //timer reached
-  client.publish("/Clock/effect/set", "1", true); //Alarm
-  client.publish("/Clock/timer/set", "0", true);
-  client.publish("/Clock/timer", "0");
-  connect();
-
-
-  return;
-}
