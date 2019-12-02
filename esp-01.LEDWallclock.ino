@@ -394,11 +394,11 @@ void ClockFrame(int Red, int Green, int Blue) {
 }
 
 int ClockSegments(RgbColor Cvalue5, RgbColor Cvalue15) {
-  for (int i = 1; i <= 12; i++) {
+  for (int i = 0; i <= 11; i++) {
     strip.SetPixelColor(i * (PixelCount / 60) * 5, Cvalue5);
   }
   //show 15-minute segments
-  for (int i = 1; i <= 4; i++) {
+  for (int i = 0; i <= 3; i++) {
     strip.SetPixelColor(i * (PixelCount / 60) * 15, Cvalue15);
   }
   return 1;
@@ -408,7 +408,9 @@ int ClockSegments(RgbColor Cvalue5, RgbColor Cvalue15) {
 void ClockHands(RgbColor CvalueH, RgbColor CvalueM, RgbColor CvalueS) {
 
   //show hour hand
-  strip.SetPixelColor(map((((hourFormat12() - 1) * 5) + (minute() / 6)), 0, 59, 0, PixelCount - 1), CvalueH);
+  int i = (hourFormat12() * 5) + (int)(minute() / 12 + 0.5);
+  if (i>59) i-=60;
+  strip.SetPixelColor(map(i, 0, 59, 0, PixelCount - 1), CvalueH);
   //show minute hand
   strip.SetPixelColor(map(minute(), 0, 59, 0, PixelCount - 1), CvalueM);
   //show second hand
