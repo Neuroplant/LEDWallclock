@@ -408,7 +408,7 @@ int ClockSegments(RgbColor Cvalue5, RgbColor Cvalue15) {
 void ClockHands(RgbColor CvalueH, RgbColor CvalueM, RgbColor CvalueS) {
 
   //show hour hand
-  strip.SetPixelColor(map((((hourFormat12() - 1) * 5) + (minute() / 12)), 0, 59, 0, PixelCount - 1), CvalueH);
+  strip.SetPixelColor(map((((hourFormat12() - 1) * 5) + (minute() / 6)), 0, 59, 0, PixelCount - 1), CvalueH);
   //show minute hand
   strip.SetPixelColor(map(minute(), 0, 59, 0, PixelCount - 1), CvalueM);
   //show second hand
