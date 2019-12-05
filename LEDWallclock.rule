@@ -2,7 +2,6 @@ rule "React on Next Alarm (Echo_nextAlarm) change/update"
 when
 	Item Echo_nextAlarm changed 
 then
-	// your logic here
 	Wallclock_Alarm.sendCommand(Echo_nextAlarm.state)
 end
 
