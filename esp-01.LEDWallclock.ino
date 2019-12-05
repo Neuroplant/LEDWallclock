@@ -27,10 +27,10 @@
 #include <NeoPixelAnimator.h>
 
 // Wifi Settings
-const char * 	ssid 		= "Wifi-SSD"; 		// your network SSID (name)
-const char * 	pass 		= "Wifi-PWD";  		// your network password
+const char * 	ssid 		= "YOURSSDHERE"; // your network SSID (name)
+const char * 	pass 		= "YORWIFIPWDHERE";  // your network password
 // MQTT Settings
-const char* 	MQTTServer	= "MQTT-Server"; 	// your MQTT-Servers name
+const char* 	MQTTServer	= "YOURMQTTSERVERHERE";
 // Hardware Settings
 const uint16_t 	PixelCount 	= 60; // best effect with n*60 LEDs, but other numbers will work too
 const uint8_t 	PixelPin 	= 2;  // make sure to set this to the correct pin, ignored for Esp8266
@@ -60,8 +60,6 @@ const uint16_t PixelFadeDuration = 300; // third of a second
 const uint16_t NextPixelMoveDuration = 1000 / PixelCount; // how fast we move through the pixels
 NeoGamma<NeoGammaTableMethod> colorGamma; // for any fade animations, best to correct gamma
 const uint16_t AniTime = 10; //how long will the animation be shown (seconds)
-///
-
 
 //input RGB from mqtt
 int inRed 	= 	50;		//0..255
@@ -72,8 +70,11 @@ int inBlue 	= 	50;		//0..255
 time_t 	EndTime 	=	0;
 int 	RestTime	=	0;
 
-int status = WL_IDLE_STATUS;  // the Wifi radio's status
+//when the digital clock was displayed
+time_t prevDisplay = 0; 
 
+// the Wifi radio's status
+int status = WL_IDLE_STATUS;  
 
 // A UDP instance to let us send and receive packets over UDP
 WiFiUDP Udp;
@@ -89,10 +90,10 @@ void connect() {
   while (!client.connect("arduinoClient")) {
     delay(1000);
   }
-  client.subscribe("/Clock/colorRGB/set");
-  client.subscribe("/Clock/effect/set");
-  // client.subscribe("/Clock/timer/set");
-  client.subscribe("/Clock/alarm/set");
+  client.subscribe("/Uhr/colorRGB/set");
+  client.subscribe("/Uhr/effect/set");
+  // client.subscribe("/Uhr/timer/set");
+  client.subscribe("/Uhr/alarm/set");
 }
 
 void callback(char* topic, byte* payload, unsigned int length) {
@@ -101,43 +102,45 @@ void callback(char* topic, byte* payload, unsigned int length) {
 
 
   // change Color
-  if (strcmp(topic, "/Clock/colorRGB/set") == 0) {
+  if (strcmp(topic, "/Uhr/colorRGB/set") == 0) {
     inRed = Payload.substring(0, Payload.indexOf(',')).toInt();
     inGreen = Payload.substring(Payload.indexOf(',') + 1, Payload.lastIndexOf(',')).toInt();
     inBlue = Payload.substring(Payload.lastIndexOf(',') + 1).toInt();
   }
 
   //Start Animation
-  if (strcmp(topic, "/Clock/effect/set") == 0) {
+  if (strcmp(topic, "/Uhr/effect/set") == 0) {
     int i = Payload.substring(0, length).toInt();
     AnimationSelect(i);
   }
 
   //Start Timer
-  if (strcmp(topic, "/Clock/timer/set") == 0) {
+  if (strcmp(topic, "/Uhr/timer/set") == 0) {
     int i = Payload.substring(0, length).toInt();
+    EndTime = i + now();
   }
 
   //Set Alarm
-  if (strcmp(topic, "/Clock/alarm/set") == 0) {
+  if (strcmp(topic, "/Uhr/alarm/set") == 0) {
     tmElements_t EndTime_e;
     // * Example for Payload -> "2019-11-26T19:30:00"
     if (1 == 2) { //(payload[10] != 'T') {
       EndTime = now(); //timer canceled
-    } else {
+    } else {      
+  //parse simpleTimeFormat to time_t
       EndTime_e.Year   =  CalendarYrToTm(Payload.substring(0, Payload.indexOf('-')).toInt());
       EndTime_e.Month  =  Payload.substring(Payload.indexOf('-') + 1, Payload.lastIndexOf('-')).toInt();
       EndTime_e.Day  =  Payload.substring(Payload.lastIndexOf('-') + 1, Payload.indexOf('T')).toInt();
       EndTime_e.Hour  = Payload.substring(Payload.indexOf('T') + 1, Payload.indexOf(':')).toInt();
       EndTime_e.Minute  = Payload.substring(Payload.indexOf(':') + 1, Payload.lastIndexOf(':')).toInt();
-      EndTime_e.Second  = Payload.substring(Payload.lastIndexOf(':') + 1).toInt();
-
+      EndTime_e.Second  = Payload.substring(Payload.lastIndexOf(':') + 1,Payload.lastIndexOf(':') + 3).toInt();
       EndTime = makeTime(EndTime_e);
     }
   }
 }
 
-//Animation
+///Animation 
+//taken from the examples at NeoPixelBus
 struct MyAnimationState
 {
   RgbColor StartingColor;
@@ -156,7 +159,6 @@ const uint8_t AnimationChannels = 1; // we only need one as all the pixels are a
 NeoPixelAnimator animations03(AnimationChannels); // NeoPixel animation management object
 MyAnimationState animationState03[AnimationChannels];
 boolean fadeToColor = true;  // general purpose variable used to store effect state
-
 
 void SetRandomSeed(void)
 {
@@ -301,49 +303,44 @@ void AnimationSelect (int value) {
   switch (value) {
     case 0 :
       break;
-    case 1 : {
-        client.publish("/Clock/effect", "1");
+    case 1 : 
+        client.publish("/Uhr/effect", "1");
         strip.ClearTo(black);
-
         animations.StartAnimation(0, NextPixelMoveDuration, LoopAnimUpdate);
         int i = now();
         while (i + AniTime  > now()) {
           animations.UpdateAnimations();
+          Serial.print(".");
           strip.Show();
         }
-        break;
-      }
-//I have no idea, what I do wrong with switch..case any help welcome
-      /*  case 2 : {
-            client.publish("/Clock/effect", "2");
-            strip.ClearTo(black);
-
-            PickRandom(0.2f); // 0.0 = black, 0.25 is normal, 0.5 is bright
-            int i = now();
-            while (i + AniTime  > now()) {
-              animations02.UpdateAnimations();
-              strip.Show();
-            }
-            break;
-          }
-        case 3 : {
-            client.publish("/Clock/effect", "3");
-            strip.ClearTo(black);
-
-            FadeInFadeOutRinseRepeat(0.2f); // 0.0 = black, 0.25 is normal, 0.5 is bright
-            int i = now();
-            while (i + AniTime  > now()) {
-              animations03.UpdateAnimations();
-              strip.Show();
-            }
-            break;
-          }*/
-  }
-  client.publish("/Clock/effect", "0", true);
-  client.publish("/Clock/effect/set", "0", true);
+      break;
+  /* Don't know what is wrong here, any help welcome 
+		case 2 : 
+        client.publish("/Uhr/effect", "2");
+        strip.ClearTo(black);
+        PickRandom(0.2f); // 0.0 = black, 0.25 is normal, 0.5 is bright
+        int i = now();
+        while (i + AniTime  > now()) {
+          animations02.UpdateAnimations();
+          Serial.print(".");
+          strip.Show();
+        }
+      break;
+    case 3 : 
+        client.publish("/Uhr/effect", "3");
+        strip.ClearTo(black);
+        FadeInFadeOutRinseRepeat(0.2f); // 0.0 = black, 0.25 is normal, 0.5 is bright
+        int i = now();
+        while (i + AniTime  > now()) {
+          animations03.UpdateAnimations();
+          Serial.print(".");
+          strip.Show();
+        }
+      break;
+*/  }
+  client.publish("/Uhr/effect", "0", true);
+  client.publish("/Uhr/effect/set", "0", true);
 }
-
-///Amimation
 
 void setup()
 {
@@ -367,7 +364,7 @@ void setup()
   client.setCallback(callback);
   connect();
 }
-time_t prevDisplay = 0; // when the digital clock was displayed
+
 void loop()
 {
   client.loop();
@@ -380,20 +377,19 @@ void loop()
   }
 }
 
-
-
 void ClockFrame(int Red, int Green, int Blue) {
   RgbColor Cfill(Red, Green, Blue);
   //delete hands and write all leds in selected color
   strip.ClearTo(Cfill);
-  //publish to mqtt as feedback (is this needed or wrong?)
+  //publish to mqtt as feedback
   char restate[12];
   String i = (String(Red) + "," + String(Green) + "," + String(Blue));
   i.toCharArray(restate, 12);
-  client.publish("/Clock/colorRGB", restate);
+  client.publish("/Uhr/colorRGB", restate);
 }
 
 int ClockSegments(RgbColor Cvalue5, RgbColor Cvalue15) {
+	//show 5-minute segments
   for (int i = 0; i <= 11; i++) {
     strip.SetPixelColor(i * (PixelCount / 60) * 5, Cvalue5);
   }
@@ -404,9 +400,7 @@ int ClockSegments(RgbColor Cvalue5, RgbColor Cvalue15) {
   return 1;
 }
 
-
 void ClockHands(RgbColor CvalueH, RgbColor CvalueM, RgbColor CvalueS) {
-
   //show hour hand
   int i = (hourFormat12() * 5) + (int)(minute() / 12 + 0.5);
   if (i>59) i-=60;
@@ -426,11 +420,9 @@ void ClockTimer(time_t value, RgbColor Cvalue) {
   if (RestTime > 0) {
     char restate[24];
     sprintf(restate, "%d", RestTime);
-    client.publish("/Clock/timer", restate,false);
-
+    client.publish("/Uhr/timer", restate,false);
     sprintf(restate, "%04d-%02d-%02dT%02d:%02d:%02d", year(value), month(value), day(value), hour(value), minute(value), second(value));
-    // client.publish("/Clock/alarm", restate,false);
-   
+    // client.publish("/Uhr/alarm", restate,false);
     if ((RestTime >= 3600) && (RestTime <= TimerLimit)) {
       // >1 hour
       for (int i = 0; i < map(RestTime, 0, 24 * 3600, 0, PixelCount); i ++) {
@@ -455,7 +447,6 @@ void ClockTimer(time_t value, RgbColor Cvalue) {
 }
 
 void digitalClockDisplay() {
-
   //Clock Frame alias Light
   ClockFrame(inRed, inGreen, inBlue);
   //Clock Segments, only shown at a minimum light level
