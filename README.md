@@ -18,4 +18,4 @@ very low cost Wallclock based on ESP01 and WS2812B Leds
   - Capacitor 1000µF/6.3V
   - DC Powersupply
   -	ESP8266-01
-  - WS1212B LED Strip, looks best with a multiple of 60 LEDs
+  - WS2812B LED Strip or Ring, looks best with a multiple of 60 LEDs
