@@ -18,94 +18,131 @@
   - DC Powersupply
   -	ESP8266-01
 */
-#include <ESP8266WiFi.h>
+#include <FS.h>
+#include <WiFiManager.h>
+#ifdef ESP32
+  #include <SPIFFS.h>
+#endif
+#include <ArduinoJson.h>          //https://github.com/bblanchon/ArduinoJson
+//#include <ESP8266WiFi.h>
 #include <PubSubClient.h>
 #include <WiFiUdp.h>
 #include <TimeLib.h>
 #include <NeoPixelBus.h>
 #include <stdlib.h>
 #include <NeoPixelAnimator.h>
+#include <Stack.h>
+
 
 // Wifi Settings
-const char * 	ssid 		= "YOURSSDHERE"; // your network SSID (name)
-const char * 	pass 		= "YORWIFIPWDHERE";  // your network password
+
 // MQTT Settings
-const char* 	MQTTServer	= "YOURMQTTSERVERHERE";
+char MQTTServer[40];
+char MQTTClient[20];
+char MQTTPW[20];
+
+//flag for saving data
+bool shouldSaveConfig = false;
+
+//callback notifying us of the need to save config
+void saveConfigCallback () {
+  Serial.println("Should save config");
+  shouldSaveConfig = true;
+}
 // Hardware Settings
-const uint16_t 	PixelCount 	= 60; // best effect with n*60 LEDs, but other numbers will work too
-const uint8_t 	PixelPin 	= 2;  // make sure to set this to the correct pin, ignored for Esp8266
-const uint16_t 	TimerLimit 	= 600;//timer shows only if left time is < TimerLimit
+const uint16_t PixelCount = 120;  // best effect with n*60 LEDs, but other numbers will work too
+const uint8_t PixelPin = 2;       // make sure to set this to the correct pin, ignored for Esp8266
+int TimerLimit = 1800;            //timer shows only if left time is < TimerLimit
+int Rotation = 0;                 //if the first pixel is anywhere else than "up"
+
 ///NTP Settings
-IPAddress timeServer(134, 95, 192, 172); // Uni Köln
-const int timeZone = 1;     // Central European Time
+IPAddress timeServer(134, 95, 192, 172);  // Uni Köln
+const int timeZone = 1;                   // Central European Time
 //const int timeZone = -5;  // Eastern Standard Time (USA)
 //const int timeZone = -4;  // Eastern Daylight Time (USA)
 //const int timeZone = -8;  // Pacific Standard Time (USA)
 //const int timeZone = -7;  // Pacific Daylight Time (USA)
 // Color Settings (leave to default)
-#define colorSaturation 128
+#define colorSaturation 255
 NeoPixelBus<NeoGrbFeature, NeoEsp8266Uart1Ws2812xMethod > strip(PixelCount, PixelPin);
-RgbColor Csecond (map(255, 0, 255, 0, colorSaturation), map(0, 0, 255, 0, colorSaturation), map(0, 0, 255, 0, colorSaturation));
-RgbColor Cminute (map(0, 0, 255, 0, colorSaturation), map(255, 0, 255, 0, colorSaturation), map(0, 0, 255, 0, colorSaturation));
-RgbColor Chour (map(0, 0, 255, 0, colorSaturation), map(0, 0, 255, 0, colorSaturation), map(255, 0, 255, 0, colorSaturation));
-RgbColor Csegment5 (map(10, 0, 255, 0, colorSaturation), map(10, 0, 255, 0, colorSaturation), map(10, 0, 255, 0, colorSaturation));
-RgbColor Csegment15 (map(200, 0, 255, 0, colorSaturation), map(200, 0, 255, 0, colorSaturation), map(200, 0, 255, 0, colorSaturation));
-RgbColor Ctimer (map(100, 0, 255, 0, colorSaturation), map(0, 0, 255, 0, colorSaturation), map(0, 0, 255, 0, colorSaturation));
+RgbColor Csecond(map(255, 0, 255, 0, colorSaturation), map(0, 0, 255, 0, colorSaturation), map(0, 0, 255, 0, colorSaturation));
+RgbColor Cminute(map(0, 0, 255, 0, colorSaturation), map(255, 0, 255, 0, colorSaturation), map(0, 0, 255, 0, colorSaturation));
+RgbColor Chour(map(0, 0, 255, 0, colorSaturation), map(0, 0, 255, 0, colorSaturation), map(255, 0, 255, 0, colorSaturation));
+RgbColor Csegment5(map(10, 0, 255, 0, colorSaturation), map(10, 0, 255, 0, colorSaturation), map(10, 0, 255, 0, colorSaturation));
+RgbColor Csegment15(map(20, 0, 255, 0, colorSaturation), map(20, 0, 255, 0, colorSaturation), map(20, 0, 255, 0, colorSaturation));
+RgbColor Ctimer(map(100, 0, 255, 0, colorSaturation), map(0, 0, 255, 0, colorSaturation), map(0, 0, 255, 0, colorSaturation));
 RgbColor black(0);
 
 ///Animation Settings (leave to default)
-const uint16_t AnimCount = PixelCount / 5 * 2 + 1; // we only need enough animations for the tail and one extra
-const uint16_t PixelFadeDuration = 300; // third of a second
-// one second divide by the number of pixels = loop once a second
-const uint16_t NextPixelMoveDuration = 1000 / PixelCount; // how fast we move through the pixels
-NeoGamma<NeoGammaTableMethod> colorGamma; // for any fade animations, best to correct gamma
-const uint16_t AniTime = 10; //how long will the animation be shown (seconds)
-
+int AniTime = 10;       //how long will the animation be shown (seconds)
+int NextAnimation = 1;  //selects the animatio played on alarm
 //input RGB from mqtt
-int inRed 	= 	50;		//0..255
-int inGreen = 	50;		//0..255
-int inBlue 	= 	50;		//0..255
+long FrameRed = 50;    //0..255
+long FrameGreen = 50;  //0..255
+long FrameBlue = 50;   //0..255
 
-//Hand positions
-time_t 	EndTime 	=	0;
-int 	RestTime	=	0;
+
+//Alarm 
+time_t EndTime = now(); //Alarm goes at Endtime
+unsigned long RestTime = 0; //Seconds left till alarm
+Stack<time_t> ReminderStack; //Stack Reminder/Alarm so none gets forgotten
 
 //when the digital clock was displayed
-time_t prevDisplay = 0; 
+time_t prevDisplay = 0;
 
 // the Wifi radio's status
-int status = WL_IDLE_STATUS;  
+int status = WL_IDLE_STATUS;
 
 // A UDP instance to let us send and receive packets over UDP
 WiFiUDP Udp;
 unsigned int localPort = 8888;  // local port to listen for UDP packets
 //NTP
 WiFiClient net;
-PubSubClient  client(net);
-void AnimationSelect (int value);
+
+//Rotate by [Rotation] pixel to maintain Clock orientation
+int Protate(int i) {
+  i = i + Rotation;
+  if (i >= PixelCount) {
+    i = i - PixelCount;
+  }
+  return i;
+}
+
+PubSubClient client(net);
+void AnimationSelect(int value);
 void connect() {
   while (WiFi.status() != WL_CONNECTED) {
     delay(1000);
   }
-  while (!client.connect("arduinoClient")) {
+  while (!client.connect(MQTTServer, MQTTClient, MQTTPW)) {
     delay(1000);
   }
-  client.subscribe("/Uhr/colorRGB/set");
+  client.subscribe("/Uhr/colorRGB/set");  //color
   client.subscribe("/Uhr/effect/set");
-  // client.subscribe("/Uhr/timer/set");
+  client.subscribe("/Uhr/timer/set");
   client.subscribe("/Uhr/alarm/set");
+  client.subscribe("/Uhr/TimerLimit/set");
+  client.subscribe("/Uhr/Rotation/set");
+  client.subscribe("/Uhr/Csecond/set");     //color
+  client.subscribe("/Uhr/Cminute/set");     //color
+  client.subscribe("/Uhr/Chour/set");       //color
+  client.subscribe("/Uhr/Csegment5/set");   //color
+  client.subscribe("/Uhr/Csegment15/set");  //color
+  client.subscribe("/Uhr/Ctimer/set");
+  client.subscribe("/Uhr/NextAnimation/set");
+  client.subscribe("/Uhr/AniTime/set");
 }
 
 void callback(char* topic, byte* payload, unsigned int length) {
   payload[length] = 0;
   String Payload = String((char*)payload);
 
-
   // change Color
   if (strcmp(topic, "/Uhr/colorRGB/set") == 0) {
-    inRed = Payload.substring(0, Payload.indexOf(',')).toInt();
-    inGreen = Payload.substring(Payload.indexOf(',') + 1, Payload.lastIndexOf(',')).toInt();
-    inBlue = Payload.substring(Payload.lastIndexOf(',') + 1).toInt();
+    /* RGB */
+    FrameRed = Payload.substring(0, Payload.indexOf(',')).toInt();
+    FrameGreen = Payload.substring(Payload.indexOf(',') + 1, Payload.lastIndexOf(',')).toInt();
+    FrameBlue = Payload.substring(Payload.lastIndexOf(',') + 1).toInt();
   }
 
   //Start Animation
@@ -122,85 +159,182 @@ void callback(char* topic, byte* payload, unsigned int length) {
 
   //Set Alarm
   if (strcmp(topic, "/Uhr/alarm/set") == 0) {
-    tmElements_t EndTime_e;
+    //tmElements_t EndTime_e;
     // * Example for Payload -> "2019-11-26T19:30:00"
-    if (1 == 2) { //(payload[10] != 'T') {
-      EndTime = now(); //timer canceled
-    } else {      
-  //parse simpleTimeFormat to time_t
-      EndTime_e.Year   =  CalendarYrToTm(Payload.substring(0, Payload.indexOf('-')).toInt());
-      EndTime_e.Month  =  Payload.substring(Payload.indexOf('-') + 1, Payload.lastIndexOf('-')).toInt();
-      EndTime_e.Day  =  Payload.substring(Payload.lastIndexOf('-') + 1, Payload.indexOf('T')).toInt();
-      EndTime_e.Hour  = Payload.substring(Payload.indexOf('T') + 1, Payload.indexOf(':')).toInt();
-      EndTime_e.Minute  = Payload.substring(Payload.indexOf(':') + 1, Payload.lastIndexOf(':')).toInt();
-      EndTime_e.Second  = Payload.substring(Payload.lastIndexOf(':') + 1,Payload.lastIndexOf(':') + 3).toInt();
-      EndTime = makeTime(EndTime_e);
+    if ((Payload != "UNDEF")) {       //(payload[10] != 'T') {
+      //parse simpleTimeFormat to time_t
+      tm timetm;
+      if (Payload.substring(10, 11)=="T") {
+      strptime(Payload.c_str(), "%Y-%m-%dT%H:%M:%S", &timetm);
+      } else {
+      strptime(Payload.c_str(), "%Y-%m-%d %H:%M:%S", &timetm);
+      }
+      if (EndTime > mktime(&timetm)) {
+        if (mktime(&timetm) > now()) {
+          ReminderStack.push(mktime(&timetm));
+        }
+      }
+      EndTime = mktime(&timetm);
     }
+  }
+  //("/Uhr/TimerLimit/set");
+  if (strcmp(topic, "/Uhr/TimerLimit/set") == 0) {
+    int i = Payload.substring(0, length).toInt();
+    TimerLimit = i;
+    char restate[length];
+    String(TimerLimit).toCharArray(restate, length);
+    client.publish("/Uhr/TimerLimit/", restate);
+  }
+
+  //"/Uhr/Rotation/set");
+  if (strcmp(topic, "/Uhr/Rotation/set") == 0) {
+    int i = Payload.substring(0, length).toInt();
+    Rotation = i;
+    char restate[length];
+    String(Rotation).toCharArray(restate, length);
+    client.publish("/Uhr/Rotation/", restate);
+  }
+
+  //"/Uhr/Csecond/set");
+  if (strcmp(topic, "/Uhr/Csecond/set") == 0) {
+    long TRed = Payload.substring(0, Payload.indexOf(',')).toInt();
+    long TGreen = Payload.substring(Payload.indexOf(',') + 1, Payload.lastIndexOf(',')).toInt();
+    long TBlue = Payload.substring(Payload.lastIndexOf(',') + 1).toInt();
+    Csecond = RgbColor(map(TRed, 0, 255, 0, colorSaturation), map(TGreen, 0, 255, 0, colorSaturation), map(TBlue, 0, 255, 0, colorSaturation));
+    char restate[length];
+    String i = (String(TRed) + "," + String(TGreen) + "," + String(TBlue));
+    i.toCharArray(restate, length);
+    client.publish("/Uhr/Csecond/", restate);
+  }
+
+  //"/Uhr/Cminute/set");
+  if (strcmp(topic, "/Uhr/Cminute/set") == 0) {
+    long TRed = Payload.substring(0, Payload.indexOf(',')).toInt();
+    long TGreen = Payload.substring(Payload.indexOf(',') + 1, Payload.lastIndexOf(',')).toInt();
+    long TBlue = Payload.substring(Payload.lastIndexOf(',') + 1).toInt();
+    Cminute = RgbColor(map(TRed, 0, 255, 0, colorSaturation), map(TGreen, 0, 255, 0, colorSaturation), map(TBlue, 0, 255, 0, colorSaturation));
+    char restate[length];
+    String i = (String(TRed) + "," + String(TGreen) + "," + String(TBlue));
+    i.toCharArray(restate, length);
+    client.publish("/Uhr/Cminute/", restate);
+  }
+  //"/Uhr/Chour/set");
+  if (strcmp(topic, "/Uhr/Chour/set") == 0) {
+    long TRed = Payload.substring(0, Payload.indexOf(',')).toInt();
+    long TGreen = Payload.substring(Payload.indexOf(',') + 1, Payload.lastIndexOf(',')).toInt();
+    long TBlue = Payload.substring(Payload.lastIndexOf(',') + 1).toInt();
+    Chour = RgbColor(map(TRed, 0, 255, 0, colorSaturation), map(TGreen, 0, 255, 0, colorSaturation), map(TBlue, 0, 255, 0, colorSaturation));
+    char restate[length];
+    String i = (String(TRed) + "," + String(TGreen) + "," + String(TBlue));
+    i.toCharArray(restate, length);
+    client.publish("/Uhr/Chour/", restate);
+  }
+  //"/Uhr/Csegment5/set");
+  if (strcmp(topic, "/Uhr/Csegment5/set") == 0) {
+    long TRed = Payload.substring(0, Payload.indexOf(',')).toInt();
+    long TGreen = Payload.substring(Payload.indexOf(',') + 1, Payload.lastIndexOf(',')).toInt();
+    long TBlue = Payload.substring(Payload.lastIndexOf(',') + 1).toInt();
+    Csegment5 = RgbColor(map(TRed, 0, 255, 0, colorSaturation), map(TGreen, 0, 255, 0, colorSaturation), map(TBlue, 0, 255, 0, colorSaturation));
+    char restate[length];
+    String i = (String(TRed) + "," + String(TGreen) + "," + String(TBlue));
+    i.toCharArray(restate, length);
+    client.publish("/Uhr/Csegment5/", restate);
+  }
+  //"/Uhr/Csegment15/set");
+  if (strcmp(topic, "/Uhr/Csegment15/set") == 0) {
+    long TRed = Payload.substring(0, Payload.indexOf(',')).toInt();
+    long TGreen = Payload.substring(Payload.indexOf(',') + 1, Payload.lastIndexOf(',')).toInt();
+    long TBlue = Payload.substring(Payload.lastIndexOf(',') + 1).toInt();
+    Csegment15 = RgbColor(map(TRed, 0, 255, 0, colorSaturation), map(TGreen, 0, 255, 0, colorSaturation), map(TBlue, 0, 255, 0, colorSaturation));
+    char restate[length];
+    String i = (String(TRed) + "," + String(TGreen) + "," + String(TBlue));
+    i.toCharArray(restate, length);
+    client.publish("/Uhr/Csegment15/", restate);
+  }
+  //"/Uhr/Ctimer/set");
+  if (strcmp(topic, "/Uhr/Ctimer/set") == 0) {
+    long TRed = Payload.substring(0, Payload.indexOf(',')).toInt();
+    long TGreen = Payload.substring(Payload.indexOf(',') + 1, Payload.lastIndexOf(',')).toInt();
+    long TBlue = Payload.substring(Payload.lastIndexOf(',') + 1).toInt();
+    Ctimer = RgbColor(map(TRed, 0, 255, 0, colorSaturation), map(TGreen, 0, 255, 0, colorSaturation), map(TBlue, 0, 255, 0, colorSaturation));
+    char restate[length];
+    String i = (String(TRed) + "," + String(TGreen) + "," + String(TBlue));
+    i.toCharArray(restate, length);
+    client.publish("/Uhr/Ctimer/", restate);
+  }
+  //"/Uhr/NextAnimation/set");
+  if (strcmp(topic, "/Uhr/NextAnimation/set") == 0) {
+    int i = Payload.substring(0, length).toInt();
+    NextAnimation = i;
+    char restate[length];
+    String(NextAnimation).toCharArray(restate, length);
+    client.publish("/Uhr/NextAnimation/", restate);
+  }
+  //"/Uhr/AniTime/set");
+  if (strcmp(topic, "/Uhr/AniTime/set") == 0) {
+    int i = Payload.substring(0, length).toInt();
+    AniTime = i;
+    char restate[length];
+    String(AniTime).toCharArray(restate, length+1);
+    client.publish("/Uhr/AniTime/", restate);
   }
 }
 
-///Animation 
+///Animation
 //taken from the examples at NeoPixelBus
-struct MyAnimationState
-{
+
+//Animaton 1 (NeoPixelFunLoop)
+const uint16_t AnimCount = PixelCount / 5 * 2 + 1;  // we only need enough animations for the tail and one extra
+const uint16_t PixelFadeDuration = 300;             // third of a second
+// one second divide by the number of pixels = loop once a second
+const uint16_t NextPixelMoveDuration = 1000 / PixelCount;  // how fast we move through the pixels
+NeoGamma<NeoGammaTableMethod> colorGamma;                  // for any fade animations, best to correct gamma
+
+struct MyAnimationState {
   RgbColor StartingColor;
   RgbColor EndingColor;
-  uint16_t IndexPixel; // which pixel this animation is effecting
+  uint16_t IndexPixel;  // which pixel this animation is effecting
 };
-NeoPixelAnimator animations(AnimCount); // NeoPixel animation management object
+NeoPixelAnimator animations(AnimCount);  // NeoPixel animation management object
 MyAnimationState animationState[AnimCount];
 uint16_t frontPixel = 0;  // the front of the loop
-RgbColor frontColor;  // the color at the front of the loop
-///
-NeoPixelAnimator animations02(PixelCount); // NeoPixel animation management object
-MyAnimationState animationState02[PixelCount];
-///
-const uint8_t AnimationChannels = 1; // we only need one as all the pixels are animated at once
-NeoPixelAnimator animations03(AnimationChannels); // NeoPixel animation management object
-MyAnimationState animationState03[AnimationChannels];
-boolean fadeToColor = true;  // general purpose variable used to store effect state
+RgbColor frontColor;      // the color at the front of the loop
 
-void SetRandomSeed(void)
-{
+void SetRandomSeed(void) {
   uint32_t seed;
   // random works best with a seed that can use 31 bits
   // analogRead on a unconnected pin tends toward less than four bits
   seed = analogRead(0);
   delay(1);
-  for (int shifts = 3; shifts < 31; shifts += 3)
-  {
+  for (int shifts = 3; shifts < 31; shifts += 3) {
     seed ^= analogRead(0) << shifts;
     delay(1);
   }
   randomSeed(seed);
 }
-void FadeOutAnimUpdate(const AnimationParam & param)
-{
+void FadeOutAnimUpdate(const AnimationParam& param) {
   // this gets called for each animation on every time step
   // progress will start at 0.0 and end at 1.0
   // we use the blend function on the RgbColor to mix
   // color based on the progress given to us in the animation
   RgbColor updatedColor = RgbColor::LinearBlend(
-                            animationState[param.index].StartingColor,
-                            animationState[param.index].EndingColor,
-                            param.progress);
+    animationState[param.index].StartingColor,
+    animationState[param.index].EndingColor,
+    param.progress);
   // apply the color to the strip
   strip.SetPixelColor(animationState[param.index].IndexPixel,
                       colorGamma.Correct(updatedColor));
 }
-void LoopAnimUpdate(const AnimationParam & param)
-{
+void LoopAnimUpdate(const AnimationParam& param) {
   // wait for this animation to complete,
   // we are using it as a timer of sorts
-  if (param.state == AnimationState_Completed)
-  {
+  if (param.state == AnimationState_Completed) {
     // done, time to restart this position tracking animation/timer
     animations.RestartAnimation(param.index);
     // pick the next pixel inline to start animating
     //
-    frontPixel = (frontPixel + 1) % PixelCount; // increment and wrap
-    if (frontPixel == 0)
-    {
+    frontPixel = (frontPixel + 1) % PixelCount;  // increment and wrap
+    if (frontPixel == 0) {
       // we looped, lets pick a new front color
       frontColor = HslColor(random(360) / 360.0f, 1.0f, 0.25f);
     }
@@ -208,8 +342,7 @@ void LoopAnimUpdate(const AnimationParam & param)
     // do we have an animation available to use to animate the next front pixel?
     // if you see skipping, then either you are going to fast or need to increase
     // the number of animation channels
-    if (animations.NextAvailableAnimation(&indexAnim, 1))
-    {
+    if (animations.NextAvailableAnimation(&indexAnim, 1)) {
       animationState[indexAnim].StartingColor = frontColor;
       animationState[indexAnim].EndingColor = RgbColor(0, 0, 0);
       animationState[indexAnim].IndexPixel = frontPixel;
@@ -217,42 +350,32 @@ void LoopAnimUpdate(const AnimationParam & param)
     }
   }
 }
-void BlendAnimUpdate02(const AnimationParam & param)
-{
+
+///Animation 2 (FunRandomChange)
+NeoPixelAnimator animations02(PixelCount);  // NeoPixel animation management object
+
+struct MyAnimationState2 {
+  RgbColor StartingColor;
+  RgbColor EndingColor;
+};
+MyAnimationState2 animationState02[PixelCount];
+
+void BlendAnimUpdate02(const AnimationParam& param) {
   // this gets called for each animation on every time step
   // progress will start at 0.0 and end at 1.0
   // we use the blend function on the RgbColor to mix
   // color based on the progress given to us in the animation
   RgbColor updatedColor = RgbColor::LinearBlend(
-                            animationState02[param.index].StartingColor,
-                            animationState02[param.index].EndingColor,
-                            param.progress);
+    animationState02[param.index].StartingColor,
+    animationState02[param.index].EndingColor,
+    param.progress);
   // apply the color to the strip
   strip.SetPixelColor(param.index, updatedColor);
 }
-void BlendAnimUpdate03(const AnimationParam & param)
-{
-  // this gets called for each animation on every time step
-  // progress will start at 0.0 and end at 1.0
-  // we use the blend function on the RgbColor to mix
-  // color based on the progress given to us in the animation
-  RgbColor updatedColor = RgbColor::LinearBlend(
-                            animationState03[param.index].StartingColor,
-                            animationState03[param.index].EndingColor,
-                            param.progress);
-
-  // apply the color to the strip
-  for (uint16_t pixel = 0; pixel < PixelCount; pixel++)
-  {
-    strip.SetPixelColor(pixel, updatedColor);
-  }
-}
-void PickRandom(float luminance)
-{
+void PickRandom02(float luminance) {
   // pick random count of pixels to animate
   uint16_t count = random(PixelCount);
-  while (count > 0)
-  {
+  while (count > 0) {
     // pick a random pixel
     uint16_t pixel = random(PixelCount);
 
@@ -268,10 +391,39 @@ void PickRandom(float luminance)
     count--;
   }
 }
-void FadeInFadeOutRinseRepeat(float luminance)
-{
-  if (fadeToColor)
-  {
+
+
+///Animation 3 (FunFadeInOut)
+
+const uint8_t AnimationChannels = 1;               // we only need one as all the pixels are animated at once
+NeoPixelAnimator animations03(AnimationChannels);  // NeoPixel animation management object
+MyAnimationState animationState03[AnimationChannels];
+boolean fadeToColor = true;  // general purpose variable used to store effect state
+
+struct MyAnimationState03 {
+  RgbColor StartingColor;
+  RgbColor EndingColor;
+};
+
+
+void BlendAnimUpdate03(const AnimationParam& param) {
+  // this gets called for each animation on every time step
+  // progress will start at 0.0 and end at 1.0
+  // we use the blend function on the RgbColor to mix
+  // color based on the progress given to us in the animation
+  RgbColor updatedColor = RgbColor::LinearBlend(
+    animationState03[param.index].StartingColor,
+    animationState03[param.index].EndingColor,
+    param.progress);
+
+  // apply the color to the strip
+  for (uint16_t pixel = 0; pixel < PixelCount; pixel++) {
+    strip.SetPixelColor(pixel, updatedColor);
+  }
+}
+
+void FadeInFadeOutRinseRepeat(float luminance) {
+  if (fadeToColor) {
     // Fade upto a random color
     // we use HslColor object as it allows us to easily pick a hue
     // with the same saturation and luminance so the colors picked
@@ -283,9 +435,7 @@ void FadeInFadeOutRinseRepeat(float luminance)
     animationState03[0].EndingColor = target;
 
     animations03.StartAnimation(0, time, BlendAnimUpdate03);
-  }
-  else
-  {
+  } else {
     // fade to black
     uint16_t time = random(600, 700);
 
@@ -299,62 +449,209 @@ void FadeInFadeOutRinseRepeat(float luminance)
   fadeToColor = !fadeToColor;
 }
 
-void AnimationSelect (int value) {
+void AnimationSelect(int value) {
+  int i = now();
   switch (value) {
-    case 0 :
+    case 0:
       break;
-    case 1 : 
-        client.publish("/Uhr/effect", "1");
-        strip.ClearTo(black);
-        animations.StartAnimation(0, NextPixelMoveDuration, LoopAnimUpdate);
-        int i = now();
-        while (i + AniTime  > now()) {
-          animations.UpdateAnimations();
-          Serial.print(".");
-          strip.Show();
-        }
+
+    case 1:
+      client.publish("/Uhr/effect", "1");
+      strip.ClearTo(black);
+      animations.StartAnimation(0, NextPixelMoveDuration, LoopAnimUpdate);
+      //int i = now();
+      while (i + AniTime > now()) {
+        animations.UpdateAnimations();
+        Serial.print(".");
+        strip.Show();
+      }
+
       break;
-  /* Don't know what is wrong here, any help welcome 
-		case 2 : 
-        client.publish("/Uhr/effect", "2");
-        strip.ClearTo(black);
-        PickRandom(0.2f); // 0.0 = black, 0.25 is normal, 0.5 is bright
-        int i = now();
-        while (i + AniTime  > now()) {
+      //* Don't know what is wrong here, any help welcome
+    case 2:
+      client.publish("/Uhr/effect", "2");
+      strip.ClearTo(black);
+      while (i + AniTime > now()) {
+        if (animations02.IsAnimating()) {
           animations02.UpdateAnimations();
-          Serial.print(".");
           strip.Show();
+        } else {
+          PickRandom02(0.2f);  // 0.0 = black, 0.25 is normal, 0.5 is bright
         }
+      }
       break;
-    case 3 : 
-        client.publish("/Uhr/effect", "3");
-        strip.ClearTo(black);
-        FadeInFadeOutRinseRepeat(0.2f); // 0.0 = black, 0.25 is normal, 0.5 is bright
-        int i = now();
-        while (i + AniTime  > now()) {
+    case 3:
+      client.publish("/Uhr/effect", "3");
+      strip.ClearTo(black);
+      SetRandomSeed();
+      while (i + AniTime > now()) {
+        if (animations03.IsAnimating()) {
           animations03.UpdateAnimations();
-          Serial.print(".");
           strip.Show();
+        } else {
+          FadeInFadeOutRinseRepeat(0.2f);  // 0.0 = black, 0.25 is normal, 0.5 is bright
         }
+      }
+
       break;
-*/  }
+  }
   client.publish("/Uhr/effect", "0", true);
   client.publish("/Uhr/effect/set", "0", true);
 }
 
-void setup()
-{
+void setup() {
   strip.Begin();
   strip.Show();
   SetRandomSeed();
+  Serial.begin(115200);
+  
+  /*
   // attempt to connect to WiFi network
   // We start by connecting to a WiFi network
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, pass);
+  Serial.begin(9600);
+  Serial.print("Connecting to ");
+  Serial.print(ssid);
 
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
+    Serial.print(".");
   }
+
+  */
+  Serial.println("mounting FS...");
+
+  if (SPIFFS.begin()) {
+    Serial.println("mounted file system");
+    if (SPIFFS.exists("/config.json")) {
+      //file exists, reading and loading
+      Serial.println("reading config file");
+      File configFile = SPIFFS.open("/config.json", "r");
+      if (configFile) {
+        Serial.println("opened config file");
+        size_t size = configFile.size();
+        // Allocate a buffer to store contents of the file.
+        std::unique_ptr<char[]> buf(new char[size]);
+
+        configFile.readBytes(buf.get(), size);
+
+ #if defined(ARDUINOJSON_VERSION_MAJOR) && ARDUINOJSON_VERSION_MAJOR >= 6
+        DynamicJsonDocument json(1024);
+        auto deserializeError = deserializeJson(json, buf.get());
+        serializeJson(json, Serial);
+        if ( ! deserializeError ) {
+#else
+        DynamicJsonBuffer jsonBuffer;
+        JsonObject& json = jsonBuffer.parseObject(buf.get());
+        json.printTo(Serial);
+        if (json.success()) {
+#endif
+
+          Serial.println("\nparsed json");
+          strcpy(MQTTServer, json["MQTTServer"]);
+          strcpy(MQTTClient, json["MQTTClient"]);
+          strcpy(MQTTPW, json["MQTTPW"]);
+        } else {
+          Serial.println("failed to load json config");
+        }
+        configFile.close();
+      }
+    }
+  } else {
+    Serial.println("failed to mount FS");
+  }
+  //end read
+
+  // The extra parameters to be configured (can be either global or just in the setup)
+  // After connecting, parameter.getValue() will get you the configured value
+  // id/name placeholder/prompt default length
+  WiFiManagerParameter custom_MQTTServer("MQTTServer", "MQTTServer(royser03)", MQTTServer, 40);
+  WiFiManagerParameter custom_MQTTClient("Client", "Client(MQDev)", MQTTClient, 6);
+  WiFiManagerParameter custom_MQTTPW("Passwort", "Passwort(Client)", MQTTPW, 32);
+
+  //WiFiManager
+  //Local intialization. Once its business is done, there is no need to keep it around
+  WiFiManager wifiManager;
+
+  //set config save notify callback
+  wifiManager.setSaveConfigCallback(saveConfigCallback);
+
+  //set static ip
+  //wifiManager.setSTAStaticIPConfig(IPAddress(10, 0, 1, 99), IPAddress(10, 0, 1, 1), IPAddress(255, 255, 255, 0));
+
+  //add all your parameters here
+  wifiManager.addParameter(&custom_MQTTServer);
+  wifiManager.addParameter(&custom_MQTTClient);
+  wifiManager.addParameter(&custom_MQTTPW);
+
+  //reset settings - for testing
+  //wifiManager.resetSettings();
+
+  //set minimu quality of signal so it ignores AP's under that quality
+  //defaults to 8%
+  //wifiManager.setMinimumSignalQuality();
+
+  //sets timeout until configuration portal gets turned off
+  //useful to make it all retry or go to sleep
+  //in seconds
+  //wifiManager.setTimeout(120);
+
+  //fetches ssid and pass and tries to connect
+  //if it does not connect it starts an access point with the specified name
+  //here  "AutoConnectAP"
+  //and goes into a blocking loop awaiting configuration
+  if (!wifiManager.autoConnect("ClockLight", "password")) {
+    Serial.println("failed to connect and hit timeout");
+    delay(3000);
+    //reset and try again, or maybe put it to deep sleep
+    ESP.restart();
+    delay(5000);
+  }
+
+  //if you get here you have connected to the WiFi
+  Serial.println("connected...yeey :)");
+
+  //read updated parameters
+  strcpy(MQTTServer, custom_MQTTServer.getValue());
+  strcpy(MQTTClient, custom_MQTTClient.getValue());
+  strcpy(MQTTPW, custom_MQTTPW.getValue());
+  Serial.println("The values in the file are: ");
+  Serial.println("\tMQTTServer (royser03): " + String(MQTTServer));
+  Serial.println("\tMQTTClient (MQDev): " + String(MQTTClient));
+  Serial.println("\tMQTTPW (Client): " + String(MQTTPW));
+
+  //save the custom parameters to FS
+  if (shouldSaveConfig) {
+    Serial.println("saving config");
+ #if defined(ARDUINOJSON_VERSION_MAJOR) && ARDUINOJSON_VERSION_MAJOR >= 6
+    DynamicJsonDocument json(1024);
+#else
+    DynamicJsonBuffer jsonBuffer;
+    JsonObject& json = jsonBuffer.createObject();
+#endif
+    json["MQTTServer"] = MQTTServer;
+    json["MQTTClient"] = MQTTClient;
+    json["MQTTPW"] = MQTTPW;
+
+    File configFile = SPIFFS.open("/config.json", "w");
+    if (!configFile) {
+      Serial.println("failed to open config file for writing");
+    }
+
+#if defined(ARDUINOJSON_VERSION_MAJOR) && ARDUINOJSON_VERSION_MAJOR >= 6
+    serializeJson(json, Serial);
+    serializeJson(json, configFile);
+#else
+    json.printTo(Serial);
+    json.printTo(configFile);
+#endif
+    configFile.close();
+    //end save
+  }
+
+  Serial.println("local ip");
+  Serial.println(WiFi.localIP());
   Udp.begin(localPort);
 
   setSyncProvider(getNtpTime);
@@ -362,16 +659,19 @@ void setup()
 
   client.setServer(MQTTServer, 1883);
   client.setCallback(callback);
+
+  ReminderStack.push(0);
+
   connect();
 }
 
-void loop()
-{
+void loop() {
+
   client.loop();
   if (!client.connected()) {
     connect();
   }
-  if (now() != prevDisplay) { //update the display only if time has changed
+  if (now() != prevDisplay) {  //update the display only if time has changed
     prevDisplay = now();
     digitalClockDisplay();
   }
@@ -389,13 +689,15 @@ void ClockFrame(int Red, int Green, int Blue) {
 }
 
 int ClockSegments(RgbColor Cvalue5, RgbColor Cvalue15) {
-	//show 5-minute segments
+  //show 5-minute segments
   for (int i = 0; i <= 11; i++) {
-    strip.SetPixelColor(i * (PixelCount / 60) * 5, Cvalue5);
+    strip.SetPixelColor(Protate(i * (PixelCount / 60) * 5), Cvalue5);
+    strip.SetPixelColor(Protate(1 + (i * (PixelCount / 60) * 5)), Cvalue5);
   }
   //show 15-minute segments
   for (int i = 0; i <= 3; i++) {
-    strip.SetPixelColor(i * (PixelCount / 60) * 15, Cvalue15);
+    strip.SetPixelColor(Protate(i * (PixelCount / 60) * 15), Cvalue15);
+    strip.SetPixelColor(Protate(1 + (i * (PixelCount / 60) * 15)), Cvalue15);
   }
   return 1;
 }
@@ -403,70 +705,82 @@ int ClockSegments(RgbColor Cvalue5, RgbColor Cvalue15) {
 void ClockHands(RgbColor CvalueH, RgbColor CvalueM, RgbColor CvalueS) {
   //show hour hand
   int i = (hourFormat12() * 5) + (int)(minute() / 12 + 0.5);
-  if (i>59) i-=60;
-  strip.SetPixelColor(map(i, 0, 59, 0, PixelCount - 1), CvalueH);
+  if (i > 59) i -= 60;
+  strip.SetPixelColor(Protate(map(i, 0, 59, 0, PixelCount - 1)), CvalueH);
+  strip.SetPixelColor(Protate(map(i, 0, 59, 0, PixelCount - 1) + 1), CvalueH);
   //show minute hand
-  strip.SetPixelColor(map(minute(), 0, 59, 0, PixelCount - 1), CvalueM);
+  strip.SetPixelColor(Protate(map(minute(), 0, 59, 0, PixelCount - 1)), CvalueM);
+  strip.SetPixelColor(Protate(map(minute(), 0, 59, 0, PixelCount - 1) - 1), CvalueM);
   //show second hand
-  strip.SetPixelColor(map(second(), 0, 59, 0, PixelCount - 1), CvalueS);
+  strip.SetPixelColor(Protate(map(second(), 0, 59, 0, PixelCount - 1)), CvalueS);
 }
 
 void ClockTimer(time_t value, RgbColor Cvalue) {
   if (value < now()) {
     RestTime = 0;
   } else {
-    RestTime = (int)value - (int)now();
+    RestTime = (unsigned long)value - (unsigned long)now();
   }
   if (RestTime > 0) {
     char restate[24];
     sprintf(restate, "%d", RestTime);
-    client.publish("/Uhr/timer", restate,false);
-    sprintf(restate, "%04d-%02d-%02dT%02d:%02d:%02d", year(value), month(value), day(value), hour(value), minute(value), second(value));
-    // client.publish("/Uhr/alarm", restate,false);
+    client.publish("/Uhr/timer", restate, false);
+    sprintf(restate, "%04d-%02d-%02d %02d:%02d:%02d", year(value), month(value), day(value), hour(value), minute(value), second(value));
+    client.publish("/Uhr/alarm", restate, false);
     if ((RestTime >= 3600) && (RestTime <= TimerLimit)) {
       // >1 hour
-      for (int i = 0; i < map(RestTime, 0, 24 * 3600, 0, PixelCount); i ++) {
-        strip.SetPixelColor(PixelCount - i, Cvalue);
+      for (int i = 0; i < map(RestTime, 0, 24 * 3600, 0, PixelCount); i++) {
+        strip.SetPixelColor(Protate(PixelCount - i), Cvalue);
       }
     }
 
     if ((RestTime > 60) && (RestTime < 3600) && (RestTime <= TimerLimit)) {
       // >1 Minute
       for (int i = 0; i <= map(RestTime, 0, 3600, 0, PixelCount); i++) {
-        strip.SetPixelColor(i, Ctimer);
+        strip.SetPixelColor(Protate(i), Ctimer);
       }
     }
 
     if ((RestTime <= 60) && (RestTime <= TimerLimit)) {
       //< 1 Minute
       for (int i = 0; i <= map(RestTime, 0, 60, 0, PixelCount); i++) {
-        strip.SetPixelColor(i, Ctimer);
+        strip.SetPixelColor(Protate(i), Ctimer); 
       }
+    }
+
+    if (RestTime == 1) {
+      AnimationSelect(NextAnimation);
+      if (ReminderStack.peek() != 0) EndTime = ReminderStack.pop();
     }
   }
 }
 
 void digitalClockDisplay() {
-  //Clock Frame alias Light
-  ClockFrame(inRed, inGreen, inBlue);
-  //Clock Segments, only shown at a minimum light level
-  if ((inRed > 10) || (inGreen > 10) || (inBlue > 10)) {
-    ClockSegments(Csegment5, Csegment15);
-  }
-  //Timer
+  Serial.println("digitalClockDisplay");
+
+ //Timer
   ClockTimer(EndTime, Ctimer);
+
+  //Clock Frame alias Light
+  ClockFrame(FrameRed, FrameGreen, FrameBlue);
+  //Clock Segments, only shown at a minimum light level
+  //if ((FrameRed > 5) || (FrameGreen > 5) || (FrameBlue > 5)) {
+    ClockSegments(Csegment5, Csegment15);
+  //}
+ 
   //Clock Hands, only shown if Light is switched on
-  if (inRed + inGreen + inBlue > 0) {
+  if (FrameRed + FrameGreen + FrameBlue >= 0) {
     ClockHands(Chour, Cminute, Csecond);
   }
   strip.Show();
   connect();
 }
 /*-------- NTP code ----------*/
-const int NTP_PACKET_SIZE = 48; // NTP time is in the first 48 bytes of message
-byte packetBuffer[NTP_PACKET_SIZE]; //buffer to hold incoming & outgoing packets
+const int NTP_PACKET_SIZE = 48;      // NTP time is in the first 48 bytes of message
+byte packetBuffer[NTP_PACKET_SIZE];  //buffer to hold incoming & outgoing packets
 time_t getNtpTime() {
-  while (Udp.parsePacket() > 0) ; // discard any previously received packets
+  while (Udp.parsePacket() > 0)
+    ;  // discard any previously received packets
   sendNTPpacket(timeServer);
   uint32_t beginWait = millis();
   while (millis() - beginWait < 1500) {
@@ -475,33 +789,33 @@ time_t getNtpTime() {
       Udp.read(packetBuffer, NTP_PACKET_SIZE);  // read packet into the buffer
       unsigned long secsSince1900;
       // convert four bytes starting at location 40 to a long integer
-      secsSince1900 =  (unsigned long)packetBuffer[40] << 24;
+      secsSince1900 = (unsigned long)packetBuffer[40] << 24;
       secsSince1900 |= (unsigned long)packetBuffer[41] << 16;
       secsSince1900 |= (unsigned long)packetBuffer[42] << 8;
       secsSince1900 |= (unsigned long)packetBuffer[43];
       return secsSince1900 - 2208988800UL + timeZone * SECS_PER_HOUR;
     }
   }
-  return 0; // return 0 if unable to get the time
+  return 0;  // return 0 if unable to get the time
 }
 // send an NTP request to the time server at the given address
-void sendNTPpacket(IPAddress & address) {
+void sendNTPpacket(IPAddress& address) {
   // set all bytes in the buffer to 0
   memset(packetBuffer, 0, NTP_PACKET_SIZE);
   // Initialize values needed to form NTP request
   // (see URL above for details on the packets)
-  packetBuffer[0] = 0b11100011;   // LI, Version, Mode
-  packetBuffer[1] = 0;     // Stratum, or type of clock
-  packetBuffer[2] = 6;     // Polling Interval
-  packetBuffer[3] = 0xEC;  // Peer Clock Precision
+  packetBuffer[0] = 0b11100011;  // LI, Version, Mode
+  packetBuffer[1] = 0;           // Stratum, or type of clock
+  packetBuffer[2] = 6;           // Polling Interval
+  packetBuffer[3] = 0xEC;        // Peer Clock Precision
   // 8 bytes of zero for Root Delay & Root Dispersion
-  packetBuffer[12]  = 49;
-  packetBuffer[13]  = 0x4E;
-  packetBuffer[14]  = 49;
-  packetBuffer[15]  = 52;
+  packetBuffer[12] = 49;
+  packetBuffer[13] = 0x4E;
+  packetBuffer[14] = 49;
+  packetBuffer[15] = 52;
   // all NTP fields have been given values, now
   // you can send a packet requesting a timestamp:
-  Udp.beginPacket(address, 123); //NTP requests are to port 123
+  Udp.beginPacket(address, 123);  //NTP requests are to port 123
   Udp.write(packetBuffer, NTP_PACKET_SIZE);
   Udp.endPacket();
 }
