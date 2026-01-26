@@ -1,70 +1,85 @@
 /*
   LED Wall Clock
-  ESP-01 WS2812B with 60 LED (or more) on pin 2
-  include NeoPixelBus libary
+  ESP-01 WS2812B with 60 LEDs (or more) on pin 2
+  Additional Libraries:
+	- FS / SPIFFS
+	- WiFiManager
+	- WiFi / WiFiUDP
+	- TimeLib (Time)
+	- ArduinoJson (v6.x)
+	- NeoPixelBus
+	- NeoPixelAnimator
+	- PubSubClient
   
   Features:
-  - get time from NTP (instead of buying a RTC-Modul)
-  - use free pixels as Color light (MQTT /Clock/colorRGB/set)
-  - Timer (seconds max 24h) (MQTT /Clock/timer/set)
-  - Animation-Alarm (MQTT /Clock/effect/set)
+  - Get time from NTP (instead of buying an RTC module)
+  - Use free pixels as colour light (MQTT /Clock/colorRGB/set)
+  - Timer (seconds, max 24h) (MQTT /Clock/timer/set)
+  - Animation alarm (MQTT /Clock/effect/set)
+  
   Parts:
-  - PCB (60mm*40mm)
-  - DC DC Converter (set to 5V output) (e.g. for 60 LEDs this will be okay, for more LEDs take something bigger:
-  https://www.amazon.de/AZDelivery-LM2596S-Netzteil-Adapter-Arduino/dp/B07DP3JX2X/ref=sr_1_4?__mk_de_DE=%C3%85M%C3%85%C5%BD%C3%95%C3%91&crid=37NAW85CZCOXT&keywords=dcdc+wandler&qid=1574410661&sprefix=dc+dc%2Caps%2C169&sr=8-4)
-  - Level Shifter (e.g. https://www.amazon.de/XCSOURCE®-Logisches-Konverter-Bi-Direktional-TE291/dp/B0148BLZGE/ref=sr_1_6?__mk_de_DE=%C3%85M%C3%85%C5%BD%C3%95%C3%91&crid=3PXRUEETCBDR9&keywords=level+shifter&qid=1574411353&sprefix=level+%2Caps%2C182&sr=8-6)
-  - Resistor 470Ohm
-  - Capacitor 1000µF/6.3V
-  - DC Powersupply
-  -	ESP8266-01
+   - ESP8266-01 (ESP-01)
+   - ESP8266 ESP-01/01S RGB-LED-Controller-Adapter. 
+   - 5V Powersupply (or something like this https://www.amazon.de/dp/B0F9Y5LQJB?ref=ppx_yo2ov_dt_b_fed_asin_title)
+   
+   [when I created this Project it was nessesary to build your own PCB but now you can buy one assembled with USB-C Connector
+    - PCB (60mm * 40mm)
+  - DC-DC Converter (set to 5V output) (e.g., for 60 LEDs this will be sufficient; for more LEDs, use a bigger one)
+    https://www.amazon.de/AZDelivery-LM2596S-Netzteil-Adapter-Arduino/dp/B07DP3JX2X/
+  - Level Shifter (e.g., https://www.amazon.de/XCSOURCE®-Logisches-Konverter-Bi-Direktional-TE291/dp/B0148BLZGE/)
+  - Resistor 470 Ohm
+  - Capacitor 1000µF / 6.3V
+  - DC Power Supply
+  ]
 */
-#include <FS.h>
-#include <WiFiManager.h>
+
+#include <FS.h>               // File system for SPIFFS
+#include <WiFiManager.h>      // For WiFi configuration via captive portal
+#include <WiFiUdp.h>          // For NTP (UDP)
+#include <TimeLib.h>          // Time functions (time_t, now(), etc.)
+#include <stdlib.h>           // Standard C++ functions (e.g., map, random)
+
 #ifdef ESP32
   #include <SPIFFS.h>
 #endif
-#include <ArduinoJson.h>          //https://github.com/bblanchon/ArduinoJson
-//#include <ESP8266WiFi.h>
-#include <PubSubClient.h>
-#include <WiFiUdp.h>
-#include <TimeLib.h>
-#include <NeoPixelBus.h>
-#include <stdlib.h>
-#include <NeoPixelAnimator.h>
-#include <Stack.h>
 
+#include <ArduinoJson.h>      // https://github.com/bblanchon/ArduinoJson
+#include <NeoPixelBus.h>      // https://github.com/Makuna/NeoPixelBus
+#include <NeoPixelAnimator.h> // Animations (fade, blend, etc.)
 
-// Wifi Settings
+// WiFi Settings
 
 // MQTT Settings
 char MQTTServer[40];
 char MQTTClient[20];
 char MQTTPW[20];
 
-//flag for saving data
+// Flag for saving configuration
 bool shouldSaveConfig = false;
 
-//callback notifying us of the need to save config
+// Callback notifying us of the need to save configuration
 void saveConfigCallback () {
   Serial.println("Should save config");
   shouldSaveConfig = true;
 }
-// Hardware Settings
-const uint16_t PixelCount = 120;  // best effect with n*60 LEDs, but other numbers will work too
-const uint8_t PixelPin = 2;       // make sure to set this to the correct pin, ignored for Esp8266
-int TimerLimit = 1800;            //timer shows only if left time is < TimerLimit
-int Rotation = 0;                 //if the first pixel is anywhere else than "up"
 
-///NTP Settings
-IPAddress timeServer(134, 95, 192, 172);  // Uni Köln
+// Hardware Settings
+const uint16_t PixelCount = 120;  // Best effect with multiples of 60 LEDs, other numbers also work
+const uint8_t PixelPin = 2;       // Ensure this is the correct pin; ignored for ESP8266
+int TimerLimit = 1800;            // Timer shows only if remaining time < TimerLimit
+int Rotation = 0;                 // If the first pixel is not at "up"
+
+// NTP Settings
+IPAddress timeServer(134, 95, 192, 172);  // University of Cologne
 const int timeZone = 1;                   // Central European Time
 //const int timeZone = -5;  // Eastern Standard Time (USA)
 //const int timeZone = -4;  // Eastern Daylight Time (USA)
 //const int timeZone = -8;  // Pacific Standard Time (USA)
 //const int timeZone = -7;  // Pacific Daylight Time (USA)
-// Color Settings (leave to default)
+
+// Colour Settings (leave default)
 #define colorSaturation 255
-NeoPixelBus<NeoGrbFeature, NeoEsp8266Uart1Ws2812xMethod > strip(PixelCount, PixelPin);
+NeoPixelBus<NeoGrbFeature, NeoEsp8266Uart1Ws2812xMethod> strip(PixelCount, PixelPin);
 RgbColor Csecond(map(255, 0, 255, 0, colorSaturation), map(0, 0, 255, 0, colorSaturation), map(0, 0, 255, 0, colorSaturation));
 RgbColor Cminute(map(0, 0, 255, 0, colorSaturation), map(255, 0, 255, 0, colorSaturation), map(0, 0, 255, 0, colorSaturation));
 RgbColor Chour(map(0, 0, 255, 0, colorSaturation), map(0, 0, 255, 0, colorSaturation), map(255, 0, 255, 0, colorSaturation));
@@ -73,33 +88,31 @@ RgbColor Csegment15(map(20, 0, 255, 0, colorSaturation), map(20, 0, 255, 0, colo
 RgbColor Ctimer(map(100, 0, 255, 0, colorSaturation), map(0, 0, 255, 0, colorSaturation), map(0, 0, 255, 0, colorSaturation));
 RgbColor black(0);
 
-///Animation Settings (leave to default)
-int AniTime = 10;       //how long will the animation be shown (seconds)
-int NextAnimation = 1;  //selects the animatio played on alarm
-//input RGB from mqtt
-long FrameRed = 50;    //0..255
-long FrameGreen = 50;  //0..255
-long FrameBlue = 50;   //0..255
+// Animation Settings (leave default)
+int AniTime = 10;       // How long the animation is shown (seconds)
+int NextAnimation = 1;  // Animation selected for alarm
 
+// Input RGB from MQTT
+long FrameRed = 50;    // 0..255
+long FrameGreen = 50;  // 0..255
+long FrameBlue = 50;   // 0..255
 
-//Alarm 
-time_t EndTime = now(); //Alarm goes at Endtime
-unsigned long RestTime = 0; //Seconds left till alarm
-Stack<time_t> ReminderStack; //Stack Reminder/Alarm so none gets forgotten
+// Alarm
+time_t EndTime = now();      // Alarm triggers at EndTime
+unsigned long RestTime = 0;  // Seconds remaining until alarm
 
-//when the digital clock was displayed
+// Time when the digital clock was last displayed
 time_t prevDisplay = 0;
 
-// the Wifi radio's status
+// WiFi radio status
 int status = WL_IDLE_STATUS;
 
-// A UDP instance to let us send and receive packets over UDP
+// UDP instance for sending/receiving packets
 WiFiUDP Udp;
-unsigned int localPort = 8888;  // local port to listen for UDP packets
-//NTP
-WiFiClient net;
+unsigned int localPort = 8888;  // Local port for UDP
+WiFiClient net;                  // NTP client
 
-//Rotate by [Rotation] pixel to maintain Clock orientation
+// Rotate by [Rotation] pixels to maintain clock orientation
 int Protate(int i) {
   i = i + Rotation;
   if (i >= PixelCount) {
@@ -108,76 +121,107 @@ int Protate(int i) {
   return i;
 }
 
+// Timer storage
+constexpr size_t maxTimerStored = 16;
+time_t TimerList[maxTimerStored] {0};
+
+// Store new timer in the list
+bool StoreTimer(time_t value) {
+  const time_t current = now();
+
+  // Remove expired timers
+  for (int i = 0; i < maxTimerStored; i++) {
+    if (TimerList[i] <= current) {
+      TimerList[i] = 0;
+    }
+  }
+
+  // Add new timer
+  for (int i = 0; i < maxTimerStored; i++) {
+    if (TimerList[i] == 0) {
+      TimerList[i] = value;
+      return true;
+    }
+  }
+
+  return false; // No free slot
+}
+
+// Get next timer from the list
+time_t QueryTimer() {
+  time_t value = LONG_MAX;
+  for (int i = 0; i < maxTimerStored; i++) {
+    if ((TimerList[i] != 0) && (TimerList[i] < value)) {
+      value = TimerList[i];
+    }
+  }
+  return value;
+}
+
+// MQTT client
 PubSubClient client(net);
 void AnimationSelect(int value);
+
+// Connect to MQTT and subscribe
 void connect() {
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(1000);
-  }
-  while (!client.connect(MQTTServer, MQTTClient, MQTTPW)) {
-    delay(1000);
-  }
-  client.subscribe("/Uhr/colorRGB/set");  //color
+  while (WiFi.status() != WL_CONNECTED) delay(1000);
+  while (!client.connect(MQTTServer, MQTTClient, MQTTPW)) delay(1000);
+
+  // Subscribe to relevant topics
+  client.subscribe("/Uhr/colorRGB/set");
   client.subscribe("/Uhr/effect/set");
   client.subscribe("/Uhr/timer/set");
   client.subscribe("/Uhr/alarm/set");
   client.subscribe("/Uhr/TimerLimit/set");
   client.subscribe("/Uhr/Rotation/set");
-  client.subscribe("/Uhr/Csecond/set");     //color
-  client.subscribe("/Uhr/Cminute/set");     //color
-  client.subscribe("/Uhr/Chour/set");       //color
-  client.subscribe("/Uhr/Csegment5/set");   //color
-  client.subscribe("/Uhr/Csegment15/set");  //color
+  client.subscribe("/Uhr/Csecond/set");
+  client.subscribe("/Uhr/Cminute/set");
+  client.subscribe("/Uhr/Chour/set");
+  client.subscribe("/Uhr/Csegment5/set");
+  client.subscribe("/Uhr/Csegment15/set");
   client.subscribe("/Uhr/Ctimer/set");
   client.subscribe("/Uhr/NextAnimation/set");
   client.subscribe("/Uhr/AniTime/set");
 }
 
+// MQTT callback handler
 void callback(char* topic, byte* payload, unsigned int length) {
-  payload[length] = 0;
+  payload[length-1] = 0;
   String Payload = String((char*)payload);
 
-  // change Color
+  // Change colour
   if (strcmp(topic, "/Uhr/colorRGB/set") == 0) {
-    /* RGB */
     FrameRed = Payload.substring(0, Payload.indexOf(',')).toInt();
     FrameGreen = Payload.substring(Payload.indexOf(',') + 1, Payload.lastIndexOf(',')).toInt();
     FrameBlue = Payload.substring(Payload.lastIndexOf(',') + 1).toInt();
   }
 
-  //Start Animation
+  // Start animation
   if (strcmp(topic, "/Uhr/effect/set") == 0) {
     int i = Payload.substring(0, length).toInt();
     AnimationSelect(i);
   }
 
-  //Start Timer
+  // Start timer
   if (strcmp(topic, "/Uhr/timer/set") == 0) {
     int i = Payload.substring(0, length).toInt();
-    EndTime = i + now();
+    StoreTimer(i + now());
   }
 
-  //Set Alarm
+  // Set alarm
   if (strcmp(topic, "/Uhr/alarm/set") == 0) {
-    //tmElements_t EndTime_e;
-    // * Example for Payload -> "2019-11-26T19:30:00"
-    if ((Payload != "UNDEF")) {       //(payload[10] != 'T') {
-      //parse simpleTimeFormat to time_t
+    if (Payload != "UNDEF") {
       tm timetm;
       if (Payload.substring(10, 11)=="T") {
-      strptime(Payload.c_str(), "%Y-%m-%dT%H:%M:%S", &timetm);
+        strptime(Payload.c_str(), "%Y-%m-%dT%H:%M:%S", &timetm);
       } else {
-      strptime(Payload.c_str(), "%Y-%m-%d %H:%M:%S", &timetm);
+        strptime(Payload.c_str(), "%Y-%m-%d %H:%M:%S", &timetm);
       }
-      if (EndTime > mktime(&timetm)) {
-        if (mktime(&timetm) > now()) {
-          ReminderStack.push(mktime(&timetm));
-        }
-      }
-      EndTime = mktime(&timetm);
+      StoreTimer(mktime(&timetm));
     }
   }
-  //("/Uhr/TimerLimit/set");
+
+  // Set timer limit
   if (strcmp(topic, "/Uhr/TimerLimit/set") == 0) {
     int i = Payload.substring(0, length).toInt();
     TimerLimit = i;
@@ -186,7 +230,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
     client.publish("/Uhr/TimerLimit/", restate);
   }
 
-  //"/Uhr/Rotation/set");
+  // Set rotation
   if (strcmp(topic, "/Uhr/Rotation/set") == 0) {
     int i = Payload.substring(0, length).toInt();
     Rotation = i;
@@ -195,19 +239,21 @@ void callback(char* topic, byte* payload, unsigned int length) {
     client.publish("/Uhr/Rotation/", restate);
   }
 
-  //"/Uhr/Csecond/set");
+  // Set second hand colour
   if (strcmp(topic, "/Uhr/Csecond/set") == 0) {
     long TRed = Payload.substring(0, Payload.indexOf(',')).toInt();
     long TGreen = Payload.substring(Payload.indexOf(',') + 1, Payload.lastIndexOf(',')).toInt();
     long TBlue = Payload.substring(Payload.lastIndexOf(',') + 1).toInt();
-    Csecond = RgbColor(map(TRed, 0, 255, 0, colorSaturation), map(TGreen, 0, 255, 0, colorSaturation), map(TBlue, 0, 255, 0, colorSaturation));
+    Csecond = RgbColor(map(TRed, 0, 255, 0, colorSaturation),
+                        map(TGreen, 0, 255, 0, colorSaturation),
+                        map(TBlue, 0, 255, 0, colorSaturation));
     char restate[length];
-    String i = (String(TRed) + "," + String(TGreen) + "," + String(TBlue));
+    String i = String(TRed) + "," + String(TGreen) + "," + String(TBlue);
     i.toCharArray(restate, length);
     client.publish("/Uhr/Csecond/", restate);
   }
 
-  //"/Uhr/Cminute/set");
+ //"/Uhr/Cminute/set");
   if (strcmp(topic, "/Uhr/Cminute/set") == 0) {
     long TRed = Payload.substring(0, Payload.indexOf(',')).toInt();
     long TGreen = Payload.substring(Payload.indexOf(',') + 1, Payload.lastIndexOf(',')).toInt();
@@ -464,6 +510,8 @@ void AnimationSelect(int value) {
         animations.UpdateAnimations();
         Serial.print(".");
         strip.Show();
+		client.loop();
+
       }
 
       break;
@@ -475,6 +523,7 @@ void AnimationSelect(int value) {
         if (animations02.IsAnimating()) {
           animations02.UpdateAnimations();
           strip.Show();
+		  client.loop();
         } else {
           PickRandom02(0.2f);  // 0.0 = black, 0.25 is normal, 0.5 is bright
         }
@@ -488,6 +537,7 @@ void AnimationSelect(int value) {
         if (animations03.IsAnimating()) {
           animations03.UpdateAnimations();
           strip.Show();
+		  client.loop();
         } else {
           FadeInFadeOutRinseRepeat(0.2f);  // 0.0 = black, 0.25 is normal, 0.5 is bright
         }
@@ -660,8 +710,6 @@ void setup() {
   client.setServer(MQTTServer, 1883);
   client.setCallback(callback);
 
-  ReminderStack.push(0);
-
   connect();
 }
 
@@ -707,10 +755,8 @@ void ClockHands(RgbColor CvalueH, RgbColor CvalueM, RgbColor CvalueS) {
   int i = (hourFormat12() * 5) + (int)(minute() / 12 + 0.5);
   if (i > 59) i -= 60;
   strip.SetPixelColor(Protate(map(i, 0, 59, 0, PixelCount - 1)), CvalueH);
-  strip.SetPixelColor(Protate(map(i, 0, 59, 0, PixelCount - 1) + 1), CvalueH);
   //show minute hand
   strip.SetPixelColor(Protate(map(minute(), 0, 59, 0, PixelCount - 1)), CvalueM);
-  strip.SetPixelColor(Protate(map(minute(), 0, 59, 0, PixelCount - 1) - 1), CvalueM);
   //show second hand
   strip.SetPixelColor(Protate(map(second(), 0, 59, 0, PixelCount - 1)), CvalueS);
 }
@@ -748,32 +794,27 @@ void ClockTimer(time_t value, RgbColor Cvalue) {
       }
     }
 
-    if (RestTime == 1) {
+    if (RestTime <= 1) {
       AnimationSelect(NextAnimation);
-      if (ReminderStack.peek() != 0) EndTime = ReminderStack.pop();
-    }
+      }
   }
 }
 
 void digitalClockDisplay() {
   Serial.println("digitalClockDisplay");
 
- //Timer
-  ClockTimer(EndTime, Ctimer);
+
 
   //Clock Frame alias Light
   ClockFrame(FrameRed, FrameGreen, FrameBlue);
-  //Clock Segments, only shown at a minimum light level
-  //if ((FrameRed > 5) || (FrameGreen > 5) || (FrameBlue > 5)) {
-    ClockSegments(Csegment5, Csegment15);
-  //}
- 
-  //Clock Hands, only shown if Light is switched on
-  if (FrameRed + FrameGreen + FrameBlue >= 0) {
-    ClockHands(Chour, Cminute, Csecond);
-  }
+   //Timer
+  ClockTimer(QueryTimer(), Ctimer);
+//Static markers for 5/15 Minutes
+  ClockSegments(Csegment5, Csegment15);
+//Clock Hands
+   ClockHands(Chour, Cminute, Csecond);
+  
   strip.Show();
-  connect();
 }
 /*-------- NTP code ----------*/
 const int NTP_PACKET_SIZE = 48;      // NTP time is in the first 48 bytes of message
@@ -819,4 +860,4 @@ void sendNTPpacket(IPAddress& address) {
   Udp.write(packetBuffer, NTP_PACKET_SIZE);
   Udp.endPacket();
 }
-/*-------- NTP code ----------*/
+/*-------- NTP code ----------*/														 
