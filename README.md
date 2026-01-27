@@ -31,15 +31,15 @@ very low cost Wallclock based on ESP01 and WS2812B Leds
    - ESP8266 ESP-01/01S RGB-LED-Controller-Adapter. 
    - 5V Powersupply (or something like this https://www.amazon.de/dp/B0F9Y5LQJB?ref=ppx_yo2ov_dt_b_fed_asin_title)
    
-  *when I created this Project it was nessesary to build your own PCB but now you can buy one assembled with, I will keep everything here in case someone wants to solder it himself
-    - PCB (60mm * 40mm)
+  **when I created this Project it was nessesary to build your own PCB but now you can buy one, that is ready to go (most come with a ESP01 included)
+     I will keep everything here in case someone wants to solder it himself**
+  - PCB (60mm * 40mm)
   - DC-DC Converter (set to 5V output) (e.g., for 60 LEDs this will be sufficient; for more LEDs, use a bigger one)
     https://www.amazon.de/AZDelivery-LM2596S-Netzteil-Adapter-Arduino/dp/B07DP3JX2X/
   - Level Shifter (e.g., https://www.amazon.de/XCSOURCE®-Logisches-Konverter-Bi-Direktional-TE291/dp/B0148BLZGE/)
   - Resistor 470 Ohm
   - Capacitor 1000µF / 6.3V
-  - DC Power Supply
-  *
+  - DC Power Supply**
   # Libraries
   
   - FS / SPIFFS
