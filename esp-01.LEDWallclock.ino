@@ -186,8 +186,9 @@ void connect() {
 
 // MQTT callback handler
 void callback(char* topic, byte* payload, unsigned int length) {
-  payload[length-1] = 0;
-  String Payload = String((char*)payload);
+  //String topicStr = topic; 
+  payload[length] = 0;
+  String Payload = String(( char *) payload);
 
   // Change colour
   if (strcmp(topic, "/Uhr/colorRGB/set") == 0) {
@@ -861,3 +862,4 @@ void sendNTPpacket(IPAddress& address) {
   Udp.endPacket();
 }
 /*-------- NTP code ----------*/														 
+
