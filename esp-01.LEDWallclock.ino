@@ -516,7 +516,6 @@ void AnimationSelect(int value) {
       }
 
       break;
-      //* Don't know what is wrong here, any help welcome
     case 2:
       client.publish("/Uhr/effect", "2");
       strip.ClearTo(black);
@@ -797,6 +796,8 @@ void ClockTimer(time_t value, RgbColor Cvalue) {
 
     if (RestTime <= 1) {
       AnimationSelect(NextAnimation);
+		NextAnimation++;
+		if (NextAnimation > 3) Nextanimation = 1;
       }
   }
 }
@@ -862,4 +863,5 @@ void sendNTPpacket(IPAddress& address) {
   Udp.endPacket();
 }
 /*-------- NTP code ----------*/														 
+
 
