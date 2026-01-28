@@ -10,20 +10,20 @@ very low cost Wallclock based on ESP01 and WS2812B Leds
   # MQTT
   you will need an  MQTT Broker (I tested with Mosquitto)
   Topics are:
-  - /Uhr/colorRGB/set  Use the free frame pixel as Color Light
-  - /Uhr/effect/set    0..3 will imediatly start Animation
-  - /Uhr/timer/set     Coutdown in seconds for next Timer/Alarm
-  - /Uhr/alarm/set     ISO8601 for next Timer/Alarm
-  - /Uhr/TimerLimit/set  seconds before event the timer is shown
-  - /Uhr/Rotation/set  pixel to rotate the dial to be upright (I found it to be more convinient in the MQTT section than hardcoded.
-  - /Uhr/Csecond/set   RGB of the second hand
-  - /Uhr/Cminute/set   RGB of the minute hand
-  - /Uhr/Chour/set     RGB if the hour hand
-  - /Uhr/Csegment5/set RGB of the 5-minutes marks (5, 10, 20, 25, 35, 40, 50, 55)
-  - /Uhr/Csegment15/set  RGB of the 15-minutes marks (0, 15, 30, 45)
-  - /Uhr/Ctimer/set    	RGB of the timer shown
-  - /Uhr/NextAnimation/set  1..3 selects the next Timer/Alarm animaion
-  - /Uhr/AniTime/set   time the timer/Alarm animation is shown in seconds
+  - /Uhr/colorRGB/set  &emsp;Use the free frame pixel as Color Light
+  - /Uhr/effect/set    &emsp;0..3 will imediatly start Animation
+  - /Uhr/timer/set     &emsp;Coutdown in seconds for next Timer/Alarm
+  - /Uhr/alarm/set     &emsp;ISO8601 for next Timer/Alarm
+  - /Uhr/TimerLimit/set  &emsp;seconds before event the timer is shown
+  - /Uhr/Rotation/set  &emsp;pixel to rotate the dial to be upright (I found it to be more convinient in the MQTT section than hardcoded.
+  - /Uhr/Csecond/set   &emsp;RGB of the second hand
+  - /Uhr/Cminute/set   &emsp;RGB of the minute hand
+  - /Uhr/Chour/set     &emsp;RGB if the hour hand
+  - /Uhr/Csegment5/set &emsp;RGB of the 5-minutes marks (5, 10, 20, 25, 35, 40, 50, 55)
+  - /Uhr/Csegment15/set  &emsp;RGB of the 15-minutes marks (0, 15, 30, 45)
+  - /Uhr/Ctimer/set    	&emsp;RGB of the timer shown
+  - /Uhr/NextAnimation/set  &emsp;1..3 selects the next Timer/Alarm animaion
+  - /Uhr/AniTime/set   &emsp;time the timer/Alarm animation is shown in seconds
 
 # Parts:
  in addition to the WS2812B strip:
